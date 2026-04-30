@@ -1,0 +1,19 @@
+{
+  "name": "atlas",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,green \"npm run dev --workspace @atlas/api\" \"npm run dev --workspace @atlas/web\"",
+    "build": "npm run build --workspace @atlas/shared && npm run build --workspace @atlas/api && npm run build --workspace @atlas/web",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "typescript": "^5.4.5"
+  }
+}

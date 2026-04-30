@@ -1,0 +1,9 @@
+id: atlas
+name: Atlas
+theme: tool
+status: in-progress
+tagline: Agent-native 多产品规格管理系统
+tech_stack: [TypeScript, React, Vite, Express, Tailwind]
+source_path: /Users/budalord/Atlas
+deploy_url: null
+created_at: 2026-04-30
