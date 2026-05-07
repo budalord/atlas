@@ -37,7 +37,7 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
 
   return (
     <div
-      className="overflow-auto rounded border border-slate-200 bg-white p-4"
+      className="mermaid-block max-h-[480px] overflow-auto rounded border border-slate-200 bg-white p-4"
       dangerouslySetInnerHTML={{ __html: svg }}
     />
   );

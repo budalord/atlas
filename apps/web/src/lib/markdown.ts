@@ -48,6 +48,29 @@ export function stripH2Sections(markdown: string, headings: string[]) {
 }
 
 /**
+ * Extract the body of a single H1 or H2 section (without the heading line).
+ * Returns "" if not found. The section ends at the next H1/H2 (or EOF).
+ */
+export function extractSection(markdown: string, heading: string): string {
+  const lines = markdown.split("\n");
+  const result: string[] = [];
+  let inside = false;
+  for (const line of lines) {
+    const h1 = line.match(/^#\s+(.+?)\s*$/);
+    const h2 = line.match(/^##\s+(.+?)\s*$/);
+    if (inside) {
+      if (h1 || h2) break;
+      result.push(line);
+      continue;
+    }
+    if ((h1 && h1[1].trim() === heading) || (h2 && h2[1].trim() === heading)) {
+      inside = true;
+    }
+  }
+  return result.join("\n").trim();
+}
+
+/**
  * Drop a leading H1 (with any blank lines below it) from a markdown document.
  * Used when the title is already shown by the surrounding UI.
  */

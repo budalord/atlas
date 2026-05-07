@@ -6,7 +6,8 @@ import {
   statusDistribution,
   type FeatureGroup
 } from "../lib/featureGrouping";
-import { featureLevelPrompt } from "../lib/promptTemplates";
+import { featureLevelPrompt, groupLevelPrompt } from "../lib/promptTemplates";
+import { statusChipClass } from "../lib/statusTone";
 import type { FeatureSpec } from "../types";
 import { CopyPromptButton } from "./CopyPromptButton";
 
@@ -98,8 +99,8 @@ function FeatureGroupPanel({ group, productId, open, onToggle }: FeatureGroupPan
   const distribution = useMemo(() => statusDistribution(group.features), [group.features]);
 
   const groupPrompt = useMemo(
-    () => group.features.map((f) => featureLevelPrompt(productId, f)).join("\n\n"),
-    [group.features, productId]
+    () => groupLevelPrompt(productId, group.label, group.features),
+    [group.features, group.label, productId]
   );
 
   return (
@@ -151,7 +152,11 @@ function FeatureGroupPanel({ group, productId, open, onToggle }: FeatureGroupPan
                 <tr key={feature.id}>
                   <td className="px-3 py-3 font-mono text-xs text-slate-600">{feature.id}</td>
                   <td className="px-3 py-3 text-slate-900">{feature.description}</td>
-                  <td className="px-3 py-3 text-slate-700">{feature.status}</td>
+                  <td className="px-3 py-3">
+                    <span className={`inline-block rounded border px-2 py-0.5 text-xs font-medium ${statusChipClass(feature.status)}`}>
+                      {feature.status || "—"}
+                    </span>
+                  </td>
                   <td className="px-3 py-3 text-slate-700">{feature.priority}</td>
                   <td className="break-words px-3 py-3 font-mono text-xs text-slate-700">{feature.endpoint}</td>
                   <td className="px-3 py-3 text-slate-600">{feature.notes}</td>

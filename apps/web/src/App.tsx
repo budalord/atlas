@@ -40,10 +40,8 @@ export default function App() {
 
 function AppHeader() {
   const products = useProductStore((s) => s.products);
-  const dataVersion = useProductStore((s) => s.dataVersion);
   const intakeCount = useIntakeStore((s) => s.list.length);
   const activeProducts = products.filter((product) => product.meta.status === "in-progress").length;
-  const totalFeatures = products.reduce((sum, product) => sum + product.features.length, 0);
 
   const linkClass = ({ isActive }: { isActive: boolean }) =>
     `rounded-md px-3 py-1.5 text-sm transition ${
@@ -67,11 +65,10 @@ function AppHeader() {
             </NavLink>
           </nav>
         </div>
-        <div className="flex flex-wrap gap-2 text-sm">
-          <Metric label="产品" value={products.length.toString()} />
-          <Metric label="进行中" value={activeProducts.toString()} />
-          <Metric label="功能点" value={totalFeatures.toString()} />
-          <Metric label="版本" value={dataVersion.toString()} />
+        <div className="text-xs text-slate-500">
+          <span className="font-semibold text-slate-900">{products.length}</span> 个产品
+          <span className="mx-1.5 text-slate-300">·</span>
+          <span className="font-semibold text-slate-900">{activeProducts}</span> 进行中
         </div>
       </div>
     </header>
@@ -123,11 +120,3 @@ function OverviewPage() {
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-      <div className="text-xs text-slate-500">{label}</div>
-      <div className="text-sm font-semibold text-slate-950">{value}</div>
-    </div>
-  );
-}

@@ -1,3 +1,4 @@
+import { statusChipClass } from "../lib/statusTone";
 import type { Product } from "../types";
 
 interface ProductCardProps {
@@ -5,13 +6,6 @@ interface ProductCardProps {
   active: boolean;
   onSelect: (id: string) => void;
 }
-
-const statusTone: Record<string, string> = {
-  "in-progress": "border-cyan-500 bg-cyan-50 text-cyan-800",
-  paused: "border-amber-500 bg-amber-50 text-amber-800",
-  live: "border-emerald-500 bg-emerald-50 text-emerald-800",
-  archived: "border-slate-400 bg-slate-100 text-slate-700"
-};
 
 export function ProductCard({ product, active, onSelect }: ProductCardProps) {
   const todoCount = product.todos.filter((todo) => !todo.done).length;
@@ -29,7 +23,7 @@ export function ProductCard({ product, active, onSelect }: ProductCardProps) {
           <div className="text-sm font-semibold text-slate-950">{product.meta.name}</div>
           <div className="mt-1 text-xs text-slate-500">{product.id}</div>
         </div>
-        <span className={`shrink-0 rounded border px-2 py-1 text-[11px] ${statusTone[product.meta.status]}`}>
+        <span className={`shrink-0 rounded border px-2 py-1 text-[11px] ${statusChipClass(product.meta.status)}`}>
           {product.meta.status}
         </span>
       </div>
