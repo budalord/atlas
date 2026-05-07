@@ -103,7 +103,7 @@ function FeatureGroupPanel({ group, productId, open, onToggle }: FeatureGroupPan
   );
 
   return (
-    <div className="overflow-hidden rounded-md border border-slate-200 bg-white">
+    <div className="group/grp overflow-hidden rounded-md border border-slate-200 bg-white">
       <div className="flex items-center gap-3 bg-slate-50 px-3 py-2">
         <button
           type="button"
@@ -127,7 +127,9 @@ function FeatureGroupPanel({ group, productId, open, onToggle }: FeatureGroupPan
             <span className="text-xs text-slate-500">{distribution}</span>
           )}
         </button>
-        <CopyPromptButton label="复制本页全部指令" prompt={groupPrompt} size="sm" />
+        <div className="opacity-0 transition group-hover/grp:opacity-100 focus-within:opacity-100">
+          <CopyPromptButton label="复制本页全部指令" prompt={groupPrompt} size="sm" />
+        </div>
       </div>
 
       {open && (

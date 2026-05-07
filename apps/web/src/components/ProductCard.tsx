@@ -33,8 +33,10 @@ export function ProductCard({ product, active, onSelect }: ProductCardProps) {
           {product.meta.status}
         </span>
       </div>
-      <p className="mt-3 line-clamp-2 text-sm leading-5 text-slate-600">{product.summary}</p>
-      <div className="mt-4 flex items-center gap-3 text-xs text-slate-500">
+      {product.meta.tagline ? (
+        <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-600">{product.meta.tagline}</p>
+      ) : null}
+      <div className="mt-3 flex items-center gap-3 text-xs text-slate-500">
         <span>{product.features.length} 功能点</span>
         <span>{todoCount} 待办</span>
         <span>{product.meta.theme}</span>
