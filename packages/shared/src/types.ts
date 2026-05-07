@@ -16,6 +16,55 @@ export interface ProductMeta {
   deploy_url: string | null;
   created_at: string;
   tagline?: string | null;
+  /** GitHub 仓库标识,例如 "owner/name" 或完整 URL。未填则关闭 GitHub 集成。 */
+  repo?: string | null;
+}
+
+export interface GitCommit {
+  hash: string;
+  shortHash: string;
+  date: string;
+  author: string;
+  subject: string;
+}
+
+export interface GitHubPullRequest {
+  number: number;
+  title: string;
+  state: "open" | "closed" | "merged";
+  url: string;
+  author: string;
+  isDraft: boolean;
+  createdAt: string;
+  updatedAt: string;
+  headRefName: string;
+  baseRefName: string;
+}
+
+export interface GitHubIssue {
+  number: number;
+  title: string;
+  state: "open" | "closed";
+  url: string;
+  author: string;
+  createdAt: string;
+  updatedAt: string;
+  labels: string[];
+}
+
+export interface GitHubSummary {
+  /** owner/name 解析后的标识;未配置时整个 summary 为 null */
+  repo: string | null;
+  /** 是否启用(meta.repo 已填 + gh 可用 + 仓库可访问) */
+  enabled: boolean;
+  /** 当 enabled=false 时的原因短消息(unconfigured / gh-missing / gh-unauthorized / repo-error) */
+  reason?: "unconfigured" | "gh-missing" | "gh-unauthorized" | "repo-error";
+  /** 错误细节,UI 用来排查 */
+  detail?: string;
+  /** 默认分支 */
+  defaultBranch?: string;
+  pullRequests?: GitHubPullRequest[];
+  issues?: GitHubIssue[];
 }
 
 export interface TodoItem {

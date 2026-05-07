@@ -59,7 +59,8 @@ export function normalizeProductMeta(meta: ProductMeta): ProductMeta {
     ...meta,
     tech_stack: Array.isArray(meta.tech_stack) ? meta.tech_stack : [],
     deploy_url: meta.deploy_url ?? null,
-    tagline: meta.tagline ?? null
+    tagline: meta.tagline ?? null,
+    repo: meta.repo ?? null
   };
 }
 

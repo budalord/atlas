@@ -4,6 +4,7 @@ import { aiRouter } from "./routes/ai";
 import { agentsRouter } from "./routes/agents";
 import { contractsRouter } from "./routes/contracts";
 import { designsRouter } from "./routes/designs";
+import { gitRouter } from "./routes/git";
 import { intakeRouter } from "./routes/intake";
 import { productsRouter } from "./routes/products";
 import { DATA_ROOT } from "./services/fileReader";
@@ -46,6 +47,7 @@ app.use("/api/designs", designsRouter);
 app.use("/api/agents", agentsRouter);
 app.use("/api/ai", aiRouter);
 app.use("/api/intake", intakeRouter);
+app.use("/api", gitRouter);
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(error);

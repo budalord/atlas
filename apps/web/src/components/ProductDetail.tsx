@@ -2,8 +2,10 @@ import { extractSection, parseKeyValueLines } from "../lib/markdown";
 import { productLevelPrompt } from "../lib/promptTemplates";
 import { statusChipClass } from "../lib/statusTone";
 import type { Product } from "../types";
+import { CommitList } from "./CommitList";
 import { CopyPromptButton } from "./CopyPromptButton";
 import { FeatureTable } from "./FeatureTable";
+import { GitHubPanel } from "./GitHubPanel";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 
 interface ProductDetailProps {
@@ -67,6 +69,10 @@ export function ProductDetail({ product }: ProductDetailProps) {
             <MarkdownRenderer markdown={flowchart} />
           </Card>
         ) : null}
+
+        <CommitList productId={product.id} />
+
+        <GitHubPanel productId={product.id} rawRepo={product.meta.repo} />
       </section>
     </main>
   );
