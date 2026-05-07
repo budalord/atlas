@@ -71,6 +71,27 @@ export function extractSection(markdown: string, heading: string): string {
 }
 
 /**
+ * 如果一段文本的每一行都是 `**Key**: Value`(中英文冒号都接受)模式,
+ * 返回结构化键值数组用于结构化渲染。任一行不匹配返回 null(交给 markdown 处理)。
+ */
+export function parseKeyValueLines(text: string): Array<{ label: string; value: string }> | null {
+  const lines = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (lines.length === 0) return null;
+
+  const pattern = /^\*\*([^*]+?)\*\*\s*[::]\s*(.+)$/;
+  const result: Array<{ label: string; value: string }> = [];
+  for (const line of lines) {
+    const m = line.match(pattern);
+    if (!m) return null;
+    result.push({ label: m[1].trim(), value: m[2].trim() });
+  }
+  return result.length > 0 ? result : null;
+}
+
+/**
  * Drop a leading H1 (with any blank lines below it) from a markdown document.
  * Used when the title is already shown by the surrounding UI.
  */

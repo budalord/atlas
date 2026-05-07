@@ -1,4 +1,4 @@
-import { extractSection } from "../lib/markdown";
+import { extractSection, parseKeyValueLines } from "../lib/markdown";
 import { productLevelPrompt } from "../lib/promptTemplates";
 import { statusChipClass } from "../lib/statusTone";
 import type { Product } from "../types";
@@ -47,7 +47,7 @@ export function ProductDetail({ product }: ProductDetailProps) {
       <section className="space-y-4 p-6">
         {summary ? (
           <Card title="当前状态">
-            <MarkdownRenderer markdown={summary} />
+            <SummaryBody markdown={summary} />
           </Card>
         ) : null}
 
@@ -81,6 +81,23 @@ function MetaInline({ label, value }: { label: string; value: string }) {
       </span>
     </div>
   );
+}
+
+function SummaryBody({ markdown }: { markdown: string }) {
+  const kv = parseKeyValueLines(markdown);
+  if (kv) {
+    return (
+      <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-[max-content_1fr]">
+        {kv.map((item) => (
+          <div className="contents" key={item.label}>
+            <dt className="text-sm font-medium text-slate-500">{item.label}</dt>
+            <dd className="text-sm leading-6 text-slate-900">{item.value}</dd>
+          </div>
+        ))}
+      </dl>
+    );
+  }
+  return <MarkdownRenderer markdown={markdown} />;
 }
 
 function Card({ title, tone, children }: { title: string; tone?: "warning"; children: React.ReactNode }) {
