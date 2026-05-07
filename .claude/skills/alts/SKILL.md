@@ -20,10 +20,17 @@ Before making changes, read the smallest set of source-of-truth files needed for
 
 ## Schema Rules
 
-- `STATUS.md` must keep the expected structure: frontmatter (with at least `last_updated`), `# 当前状态`, `## 待办`, `## 阻塞`, `## 功能点`, and `## 流程图`.
+- `STATUS.md` must keep the expected structure with all six sections in this order:
+  1. frontmatter (with at least `last_updated`)
+  2. `# 当前状态`
+  3. `## 待办`
+  4. `## 阻塞`
+  5. `## 功能点`
+  6. `## 流程图`
 - The feature table under `## 功能点` must have exactly 6 columns: `ID | 描述 | 状态 | 优先级 | 接口 | 备注`.
 - Do not use 4-column tables, omit columns, reorder columns, or add columns. The parser maps cells positionally, so malformed tables silently shift data into the wrong fields.
 - Feature IDs must be sequential within a product. The prefix can be product-specific (e.g. `F1`, `FE01`), but it must stay consistent within the same product.
+- Priority uses `P0/P1/P2/P3`.
 - For uncertain facts, write `TODO`, `待确认`, or an explicit note. Do not invent business facts.
 - `meta.yml` field values follow `docs/DATA-MODEL.md`. `status` is one of `in-progress / paused / live / archived`; `theme` is one of `seo / erp / miniapp / tool`.
 
@@ -81,6 +88,7 @@ The type source of truth is `packages/shared/src/types.ts`.
 - Confirm the 6-column feature table schema is preserved.
 - Confirm feature ID continuity and prefix consistency within the product.
 - Confirm Intake stage names and internal values still match `packages/shared/src/types.ts`.
+- After a Finalize run, confirm `data/products/<id>/` contains all three required artifacts: `STATUS.md`, `meta.yml`, and `SUMMARY.md`.
 - Confirm `STATUS.md` frontmatter `last_updated` is updated when the file changed.
 - If a task asks to "also" refactor parser or application code during spec maintenance, treat that as out of scope unless the user explicitly authorizes a separate implementation task.
 - If an existing feature table has only 4 columns or malformed columns, fix it to the 6-column schema before relying on parsed feature data.
