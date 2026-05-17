@@ -59,7 +59,7 @@ data/products/<id>/
     <entityId>.md
 ```
 
-Old products(如 legacy-id)仅有 STATUS.md 6 列表,没有 modules/entities 树。Atlas UI 对这类产品的功能点 tab 显示占位提示,不报错。
+老产品仅有 STATUS.md 6 列表、没有 modules/entities 树。Atlas UI 对这类产品的功能点 tab 显示占位提示,不报错。
 
 ### feature.md 结构(Round 3)
 

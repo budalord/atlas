@@ -15,7 +15,7 @@
 
 **本轮不做原因**: 横向扩展,不影响主流程改造。markmap 当前布局已足够清晰,加一层不会立刻好用。
 
-**启动时机**: example-erp 实际录入第二个产品(比如教务线 v3.1)时观察是否复发。或当某个 module 内 feature 数 > 10 时考虑。
+**启动时机**: 实际录入第二个产品时观察是否复发。或当某个 module 内 feature 数 > 10 时考虑。
 
 **预计工作量**:
 - feature.md frontmatter 加 `submodule?: string` 字段
@@ -81,21 +81,21 @@
 
 数据未删,基本是"git revert"工作量。
 
-### 7. legacy-id 数据迁移
+### 7. 老结构产品数据迁移
 
-**背景**: legacy-id(示例产品)用 STATUS.md 6 列表老结构,与新的 modules/features 树形结构隔离。
+**背景**: 部分老产品用 STATUS.md 6 列表老结构,与新的 modules/features 树形结构隔离。
 
-**本轮不做原因**: legacy-id 是 `live` 状态,Round 3 重构期间不动它。
+**本轮不做原因**: 老产品多处于 `live` 状态,重构期间不动它们。
 
-**启动时机**: legacy-id 进入新的功能迭代周期时,或用户希望在示例产品上试用反馈池机制时,考虑迁到 modules/features 树。
+**启动时机**: 老产品进入新的功能迭代周期,或希望试用反馈池机制时,考虑迁到 modules/features 树。
 
 **预计工作量**:
-- 21 个 feature 手工迁移成 modules/<m>/features/<f>.md
+- feature 手工迁移成 modules/<m>/features/<f>.md
 - STATUS.md 老段清理(保留概览/待办/阻塞/流程图,删除 ## 功能点 表)
-- 决定 module 划分(题库 / 学习核心 / 用户管理 / 等)
+- 决定 module 划分
 - 反馈池 / GLOBAL-FEEDBACK / CONVENTIONS 后续 Agent 自助生成
 
-迁移过程中 legacy-id 短期不可用(几小时级)。建议挑非工作日做。
+迁移期间产品短期不可用,建议挑非工作日做。
 
 ## 维护说明
 

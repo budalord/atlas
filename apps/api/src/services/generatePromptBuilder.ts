@@ -116,7 +116,7 @@ export async function buildFeatureGeneratePrompt(productId: string): Promise<Gen
   const parts = [
     header(meta, productId, "功能点"),
     `## 你的任务
-你是开发者的大 Agent。基于产品描述,生成 Atlas 三层架构的功能点骨架,**严格遵守 feature-source-contract**。
+你是 Atlas 的大 Agent。基于产品描述,生成 Atlas 三层架构的功能点骨架,**严格遵守 feature-source-contract**。
 
 **三层架构**:
 1. **业务方向 (module)** — 顶层划分,如 销售线 / 财务线 / 教务线
@@ -274,7 +274,7 @@ export async function buildEntityGeneratePrompt(productId: string): Promise<Gene
   const parts = [
     header(meta, productId, "实体"),
     `## 你的任务
-你是开发者的实体 Agent。基于产品的全部 **features**,识别出业务**实体**(Entity),
+你是 Atlas 的实体 Agent。基于产品的全部 **features**,识别出业务**实体**(Entity),
 为每个实体生成 entity md 文件。
 
 工作流要求:
@@ -341,7 +341,7 @@ export async function buildConventionsGeneratePrompt(productId: string): Promise
   const parts = [
     header(meta, productId, "L0 规范"),
     `## 你的任务
-你是开发者的规范 Agent。基于现有 **features + entities**,识别出该产品级别的**规范约束**(L0),
+你是 Atlas 的规范 Agent。基于现有 **features + entities**,识别出该产品级别的**规范约束**(L0),
 生成 \`CONVENTIONS.md\`。L0 是 Agent 在 L1(实体)/ L2(功能点)操作时必须遵循的硬约束基线。
 
 工作流要求:

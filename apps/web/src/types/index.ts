@@ -49,5 +49,10 @@ export type {
   RolesRegistry,
   // 流程图 derived 数据 (data/products/<id>/derived/flowcharts/)
   FlowchartData,
-  FlowchartQuestion
+  FlowchartQuestion,
+  // 产品规格层(Layer 2)文件
+  SpecFile,
+  SpecFileKind,
+  // 产品愿景层(Layer 1)文件
+  ProductVision
 } from "@atlas/shared";

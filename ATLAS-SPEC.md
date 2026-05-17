@@ -7,21 +7,93 @@
 ```
 data/products/<product-id>/
 ├── meta.yml                          # 产品元信息（Atlas 自动生成）
-├── STATUS.md                          # 立项期空骨架（Atlas 自动生成）
-├── GLOBAL-FEEDBACK.md                # 全局需求池（Round 3 新增，可选）
-├── CONVENTIONS.md                    # L0 规范（Round 3 新增，可选）
+├── STATUS.md                          # 立项期空骨架(Atlas 自动生成)
+├── GLOBAL-FEEDBACK.md                 # 全局需求池(Round 3 新增,可选)
+├── CONVENTIONS.md                     # L0 规范(Round 3 新增,可选)
+├── DECISIONS.md                       # 产品规格层 · 决策日志(Round 4 新增,可选)
+├── ARCHITECTURAL-WARNINGS.md          # 产品规格层 · 架构警告(Round 4 新增,可选)
+├── SEAMS.md                           # 产品规格层 · 跨模块接缝契约(Round 4 新增,可选)
+├── ENTITIES-OWNERSHIP.md              # 产品规格层 · 实体归属清单(Round 4 新增,可选)
+├── EVOLUTION-PRINCIPLES.md            # 产品规格层 · 演进式设计原则(Round 4 新增,可选)
+├── AI-REQUIREMENTS.md                 # 产品规格层 · AI 工作流需求(Round 4 新增,可选)
+├── RISKS.md                           # 产品规格层 · 风险登记(Round 4 新增,可选)
 ├── modules/
 │   ├── <module-id>/
 │   │   ├── MODULE.md                 # 模块定义
 │   │   ├── features/
 │   │   │   ├── <feature-id>.md       # 功能点文件
 │   │   │   └── ...
-│   │   └── entities/                  # 模块内独占实体（可选）
+│   │   └── entities/                  # 模块内独占实体(可选)
 │   │       └── <entity-id>.md
 │   └── ...
 └── entities/                          # 跨模块共享实体
     └── <entity-id>.md
 ```
+
+## VISION.md(Layer 1,Round 4 新增,可选)
+
+产品**愿景文件**。单文件,自由 markdown,**无强制 frontmatter**。Atlas 在概览 tab 顶部渲染完整内容(文件不存在时不渲染该卡片)。
+
+建议 H2 结构(非强制):
+
+```markdown
+## 一句话定义
+<产品定位的一句话表述>
+
+## 商业模式回路
+<可嵌 Mermaid 框图,展示主要价值流转>
+
+## ERP 边界(做什么)
+<本产品长期负责的边界 / 第三方协同 / 接入点>
+
+## 不做什么
+<明确排除的能力 / 产品边界外的事>
+
+## 推进路线
+<前期 / 中期 / 后期 / 长期 的分阶段说明>
+```
+
+**写盘约定**:用户 + Agent 协同写为主,UI 不提供写入入口(直接编辑文件)。
+
+**与 SUMMARY.md 的关系**:VISION 是**客户视角的产品长期愿景**;SUMMARY 是 **Agent 视角的 intake 录入小结**。两者职责不重叠,可同时存在。
+
+## meta.yml 扩展字段(Round 4 阶段 2)
+
+为承载 v1 §0.1 关键事实表的 9 项内容,`meta.yml` 新增以下**可选**字段:
+
+```yaml
+organization: <机构名>                    # 业主机构名
+business_domain: <业务领域>               # 业务领域
+campuses:                                 # 多场地/校区清单(可选)
+  - <场地 A>
+  - <场地 B>
+tech_lead: <技术负责人>                    # 技术负责人
+decision_makers:                          # 决策方清单
+  - <决策人 A>
+  - <决策方向>
+roadmap_phase: <当前推进阶段一句话>        # 当前推进阶段
+doc_version: v1                            # 文档版本号
+```
+
+老产品缺失这些字段不影响加载;Atlas UI 仅在字段有值时显示对应小标签。
+
+## 产品规格层文件(Layer 2,Round 4 新增)
+
+围绕功能点的**产品级横切信息**。每文件单独存在,全部**可选** —— Atlas 在 UI"规格" tab 中按 3 子页签渲染:
+
+| 文件 | 子页签 | 内容性质 | 受众 |
+|------|--------|----------|------|
+| `DECISIONS.md` | 决策与警告 | 决策日志(D-编号),含决策摘要 / 影响 features / 来源段 / status | 架构师 + Agent |
+| `ARCHITECTURAL-WARNINGS.md` | 决策与警告 | 干系人的架构警告;含原话 / 解读 / 承接位置 / 状态 | 架构师 |
+| `SEAMS.md` | 跨模块契约 | 跨模块接缝契约(8 个);含触发时机 / 数据契约 / 异常处理 | 架构师 + 派生 Agent |
+| `ENTITIES-OWNERSHIP.md` | 跨模块契约 | 实体归属清单(50+ 行表);含实体 / 归属 / 维护权限 / 备注 | 架构师 + 派生 Agent |
+| `EVOLUTION-PRINCIPLES.md` | 演进与风险 | 演进式设计原则(审批模式 / 作用域 / 接口预留 等) | 架构师 |
+| `AI-REQUIREMENTS.md` | 演进与风险 | AI 工作流需求登记(已识别的 AI 场景表) | 架构师 |
+| `RISKS.md` | 演进与风险 | 风险登记(暴雷点 / 已知开放项 / 拟处理时机) | 架构师 |
+
+**Round 4 阶段 1 行为**:Atlas 仅识别 + 渲染原文(treat as markdown),不结构化解析。Round 4 阶段 3+ 起,部分文件升级为结构化卡片(DECISIONS / SEAMS / ENTITIES-OWNERSHIP / 等)。
+
+**写盘约定**:文件由 Agent 写为主,UI 仅做小手术(后续阶段提供加条目表单)。文件缺失 = 空态,不阻塞产品加载。
 
 ## 命名规范
 
@@ -214,7 +286,7 @@ last_updated: 2026-05-15
 - id: gfb-20260515-x9y8z7
   date: 2026-05-15
   scope: feature
-  content: 建议新增「学员档案导出」功能
+  content: 建议新增「档案导出」功能
 ```
 
 ## 实体需求
@@ -284,14 +356,14 @@ last_updated: 2026-05-15
 
 ````markdown
 ---
-product_id: erp
+product_id: example-erp
 product_name: 示例 ERP
 ---
 
 # 示例 ERP
 
 ## 产品概述
-为培训培训机构定制的内部管理系统，覆盖招生、教务、财务全流程。
+一个示例 ERP 产品,用于演示 Atlas 汇总 md 导入格式。
 
 ---
 
@@ -302,25 +374,25 @@ product_name: 示例 ERP
 - order: 1
 
 ### 职责
-负责学员从初次接触到报名转化的全流程管理。
+负责线索从初次接触到转化的全流程管理。
 
 ### 功能点
 
-#### 学员录入
+#### 线索录入
 - id: lead-import
 
-描述：销售从各渠道（地推、小程序、转介绍）获取学员信息后，录入到系统形成线索池。
+描述：销售从各渠道获取线索信息后，录入到系统形成线索池。
 
 #### 跟进记录
 - id: follow-up
 
-描述：销售对线索池中的学员进行电话/微信跟进，记录每次沟通要点。
+描述：销售对线索池中的客户进行电话/微信跟进，记录每次沟通要点。
 
 ---
 
-## 模块: 教务模块
-- id: academic
-- role: 教务岗
+## 模块: 运营模块
+- id: ops
+- role: 运营岗
 - color: blue
 - order: 2
 

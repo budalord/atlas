@@ -61,7 +61,19 @@ export function normalizeProductMeta(meta: ProductMeta): ProductMeta {
     deploy_url: meta.deploy_url ?? null,
     tagline: meta.tagline ?? null,
     repo: meta.repo ?? null,
-    ...(meta.description !== undefined ? { description: meta.description } : {})
+    ...(meta.description !== undefined ? { description: meta.description } : {}),
+    // Layer 2 扩展字段(全部可选,只在源文件有值时透传)
+    ...(meta.organization !== undefined ? { organization: meta.organization } : {}),
+    ...(meta.business_domain !== undefined ? { business_domain: meta.business_domain } : {}),
+    ...(meta.campuses !== undefined
+      ? { campuses: Array.isArray(meta.campuses) ? meta.campuses : [] }
+      : {}),
+    ...(meta.tech_lead !== undefined ? { tech_lead: meta.tech_lead } : {}),
+    ...(meta.decision_makers !== undefined
+      ? { decision_makers: Array.isArray(meta.decision_makers) ? meta.decision_makers : [] }
+      : {}),
+    ...(meta.roadmap_phase !== undefined ? { roadmap_phase: meta.roadmap_phase } : {}),
+    ...(meta.doc_version !== undefined ? { doc_version: meta.doc_version } : {})
   };
 }
 

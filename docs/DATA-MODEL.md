@@ -62,7 +62,7 @@ flowchart LR
 ```
 ```
 
-老产品(如 legacy-id)走 STATUS.md 6 列表;新产品(example-erp 等)走 modules/features 树。两套结构并存。
+老产品走 STATUS.md 6 列表;新产品走 modules/features 树。两套结构并存。
 
 ## products/<id>/modules/<m>/features/<f>.md(Round 3)
 

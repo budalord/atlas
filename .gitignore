@@ -5,3 +5,10 @@ dist/
 *.log
 .env.local
 tmp/
+
+# 真实业务产品数据不入库 — 只允许 Atlas 自身(dogfood)和 example-* 前缀的脱敏示例
+data/products/*
+!data/products/.gitkeep
+!data/products/atlas/
+!data/products/example-*/
+docs/experiments/

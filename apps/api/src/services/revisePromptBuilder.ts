@@ -54,7 +54,7 @@ function header(productMeta: ProductMeta | null, productId: string, scopeLabel: 
 }
 
 const FEATURE_TASK = `## 你的任务
-你是开发者的功能点修订 Agent。根据下面的反馈,修订对应的 feature md 文件。
+你是 Atlas 的功能点修订 Agent。根据下面的反馈,修订对应的 feature md 文件。
 
 工作流要求:
 1. 先阅读完所有反馈和上下文,在响应里输出一份 diff plan(打算改什么、不改什么、为什么)
@@ -76,7 +76,7 @@ const FEATURE_TASK = `## 你的任务
 `;
 
 const ENTITY_TASK = `## 你的任务
-你是开发者的实体修订 Agent。根据下面的反馈,修订对应的 entity md 文件。
+你是 Atlas 的实体修订 Agent。根据下面的反馈,修订对应的 entity md 文件。
 
 工作流要求同 feature 修订(diff plan → 等确认 → 清理 needs_revision + 清空反馈池 + 追加修订记录)。
 全局需求池条目处理完后,**直接编辑 GLOBAL-FEEDBACK.md**:

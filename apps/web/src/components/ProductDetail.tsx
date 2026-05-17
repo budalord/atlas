@@ -4,7 +4,7 @@ import { TAB_LABELS, tabsForPhase, type TabKey } from "../lib/phaseTabs";
 import { statusToPhase } from "../lib/productPhase";
 import { productLevelPrompt } from "../lib/promptTemplates";
 import { useDataChange } from "../lib/useDataChange";
-import type { ApiEnvelope, ModuleWithFeatures, Product } from "../types";
+import type { ApiEnvelope, ModuleWithFeatures, Product, ProductVision } from "../types";
 import { AdditionalDocsPanel } from "./AdditionalDocsPanel";
 import { AgentTasksPanel } from "./AgentTasksPanel";
 import { CommitList } from "./CommitList";
@@ -18,6 +18,7 @@ import { ConventionsTab } from "./tabs/ConventionsTab";
 import { DesignTab } from "./tabs/DesignTab";
 import { EntityTab } from "./tabs/EntityTab";
 import { FeatureTab } from "./tabs/FeatureTab";
+import { SpecTab } from "./tabs/SpecTab";
 import { FeatureDrawer } from "./FeatureDrawer";
 import { useUiStore } from "../stores/uiStore";
 
@@ -84,6 +85,27 @@ export function ProductDetail({ product }: ProductDetailProps) {
           <MetaInline label="更新" value={product.last_updated ?? "未填写"} />
           <MetaInline label="源路径" value={product.meta.source_path ?? "—"} />
           <MetaInline label="部署" value={product.meta.deploy_url ?? "未部署"} />
+          {product.meta.organization ? (
+            <MetaInline label="机构" value={product.meta.organization} />
+          ) : null}
+          {product.meta.business_domain ? (
+            <MetaInline label="业务" value={product.meta.business_domain} />
+          ) : null}
+          {product.meta.campuses && product.meta.campuses.length > 0 ? (
+            <MetaInline label="校区" value={product.meta.campuses.join(" · ")} />
+          ) : null}
+          {product.meta.tech_lead ? (
+            <MetaInline label="技术负责人" value={product.meta.tech_lead} />
+          ) : null}
+          {product.meta.decision_makers && product.meta.decision_makers.length > 0 ? (
+            <MetaInline label="决策方" value={product.meta.decision_makers.join(" + ")} />
+          ) : null}
+          {product.meta.roadmap_phase ? (
+            <MetaInline label="当前阶段" value={product.meta.roadmap_phase} />
+          ) : null}
+          {product.meta.doc_version ? (
+            <MetaInline label="文档版本" value={product.meta.doc_version} />
+          ) : null}
         </dl>
       </section>
       {statusToPhase(product.meta.status) === "in-progress" ? (
@@ -119,6 +141,7 @@ export function ProductDetail({ product }: ProductDetailProps) {
         <FeatureTab productId={product.id} readOnly={readOnly} />
       ) : null}
       {tab === "overview" ? <OverviewSection product={product} phase={phase} /> : null}
+      {tab === "spec" ? <SpecTab productId={product.id} readOnly={readOnly} /> : null}
       {tab === "entities" ? <EntityTab productId={product.id} readOnly={readOnly} /> : null}
       {tab === "conventions" ? (
         <ConventionsTab productId={product.id} readOnly={readOnly} />
@@ -166,6 +189,8 @@ function OverviewSection({
 
   return (
     <section className="space-y-4 p-6">
+      <VisionPanel productId={product.id} />
+
       {summary ? (
         <Card title="当前状态">
           <SummaryBody markdown={summary} />
@@ -207,7 +232,7 @@ function OverviewSection({
 /**
  * 概览 tab 的"功能点速览"区。
  * - 新结构产品(modules/features 树):按模块分组渲染 feature 名,带 ⚠ 标记
- * - 老结构产品(legacy-id,只有 STATUS.md):回退到 FeatureTable 6 列表
+ * - 老结构产品(只有 STATUS.md):回退到 FeatureTable 6 列表
  */
 function FeaturesOverview({ product }: { product: Product }) {
   const [data, setData] = useState<ModuleWithFeatures[] | null>(null);
@@ -282,6 +307,45 @@ function FeaturesOverview({ product }: { product: Product }) {
         <FeatureTable features={product.features} productId={product.id} />
       )}
     </div>
+  );
+}
+
+/**
+ * VISION.md(Layer 1)展示卡片。
+ *
+ * - 文件存在 → 在概览顶部渲染完整 markdown
+ * - 文件不存在 → 不渲染(避免给所有产品挂空状态卡)
+ *
+ * 与 SUMMARY.md 分工:VISION 是客户视角的产品愿景,SUMMARY 是 Agent 视角的 intake 小结。
+ */
+function VisionPanel({ productId }: { productId: string }) {
+  const [vision, setVision] = useState<ProductVision | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/products/${productId}/vision`);
+      if (!res.ok) return;
+      const json = (await res.json()) as ApiEnvelope<ProductVision>;
+      setVision(json.data);
+    } catch {
+      /* 加载失败时静默,概览页其他区块照常 */
+    }
+  }, [productId]);
+
+  useEffect(() => {
+    setVision(null);
+    void load();
+  }, [load]);
+
+  useDataChange(() => {
+    void load();
+  });
+
+  if (!vision || !vision.exists) return null;
+  return (
+    <Card title="🎯 愿景">
+      <MarkdownRenderer markdown={vision.content} />
+    </Card>
   );
 }
 

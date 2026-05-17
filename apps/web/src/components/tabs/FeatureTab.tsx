@@ -204,7 +204,7 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
       <div className="flex h-[60vh] flex-col items-center justify-center gap-4 text-slate-500">
         <div className="text-sm">该产品没有模块/功能点树</div>
         <div className="max-w-md text-center text-xs leading-5 text-slate-400">
-          老产品(legacy-id 等)使用 STATUS.md 6 列表,请在「概览」tab 查看。
+          老结构产品使用 STATUS.md 6 列表,请在「概览」tab 查看。
           <br />
           新产品请点下方按钮拿到 prompt,丢给 Claude Code 让大 Agent 生成 modules + features。
         </div>

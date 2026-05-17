@@ -149,7 +149,7 @@ entities_touched: [User, Order, Payment]
 | `org` | 机构层 (跨校区共享) | `Product` / `Major` / `CommissionRule` |
 | `campus` | 校区层 (硬隔离 / 软隔离 by 字段) | `Class` / `Schedule` / `Classroom` |
 | `follows:<Entity>` | 归属跟随另一实体 | `follows:Order` (Payment / Refund 跟订单) |
-| `shared` | 跨产品共享 (走 contracts/) | `User` (与 legacy-id 账号体系共用) |
+| `shared` | 跨产品共享 (走 contracts/) | `User` (与其他产品账号体系共用) |
 
 不填 → 未声明,派生侧标 `[TBD]`。
 

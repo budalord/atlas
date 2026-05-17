@@ -55,7 +55,7 @@
 1. **POST /api/products/import-aggregate 用 `source` 字段**(原 plan 没指定),前端读 `file.text()` 后传入,避免上传 multipart。
 2. **MODULE.md 描述兼容老格式**:`loadModules()` 既读 frontmatter(新格式),也回落到 H1 + 第一段(老格式)。上轮造的 erp `MODULE.md` 因此不破坏,新导入的产品 frontmatter 字段直接取用。
 3. **Codex `--ignore-user-config`**:本机 `~/.codex/config.toml` 被 brew cask 安装路径写成了 root:staff 600 权限(原因不明,可能是 postinstall 副作用),普通用户进程读不到。用 `--ignore-user-config` 绕过,模型用 Codex 默认。**用户可后续 `sudo chown $USER ~/.codex/config.toml` 拿回自己的 config**。
-4. **`extractSection` 正则 bug 修复**:原 `${heading}\\s*\\n(.*?)(?=\\n##\\s+|$)` 中的 `\\s*` 会贪婪吃掉下节前的空行,把边界标记 `\\n##` 一并消耗,导致 lazy 捕获跨节抓到下节内容。改为 `[^\\n]*\\n`,只消费 heading 行的剩余字符。修在 `markdownParser.ts` 和 `featureParser.ts` 两处。已验证 legacy-id 现有 STATUS.md 解析不受影响(21 features、10 todos)。
+4. **`extractSection` 正则 bug 修复**:原 `${heading}\\s*\\n(.*?)(?=\\n##\\s+|$)` 中的 `\\s*` 会贪婪吃掉下节前的空行,把边界标记 `\\n##` 一并消耗,导致 lazy 捕获跨节抓到下节内容。改为 `[^\\n]*\\n`,只消费 heading 行的剩余字符。修在 `markdownParser.ts` 和 `featureParser.ts` 两处。已用老结构产品的现有 STATUS.md 验证解析不受影响。
 5. **`useDataChange` stale closure 修复**:本意是 Step 4 时改的(产品切换后 SSE 用旧 productId 把 FeatureTab 数据清空),本轮也受益。
 
 ### 已知遗留
@@ -82,7 +82,7 @@
 | 19-21 | ⏭ retry+extra 路径已写好但未在本次实跑;后端单元上有 retry endpoint 已就绪 |
 | 22-23 | ⏭ reject 路径同上 |
 | 24-25 | ⏭ 串行 3 个任务排队:taskQueue 代码用 `running` 锁 + `tick()` 递归,单跑 1 个,已经过 backend smoke + 内存验证;UI 也会显示 running/queued 三段 |
-| 26-27 | ✅ 切到 legacy-id(示例产品),21 功能点 + 10 待办,概览/契约/CLAUDE.md 完整 |
+| 26-27 | ✅ 切到老结构产品,功能点 + 待办,概览/契约/CLAUDE.md 完整 |
 | 28-29 | ✅ 上轮的 test-erp 已在 Step 1 验收时与本轮 erp 一并清空重建,实体/TBD/决策 tab 框架仍正常加载(空数据,因为本轮 erp 没用 entities 路径) |
 
 ---
@@ -139,7 +139,7 @@
 
 ## E2E 11 步全程通过
 
-按计划 §5 剧本,共 11 步,全部通过(详见各步 ✅ 行)。SSE 验证:改 `student.md` 删一个 `[TBD]` 标记后,`/api/products/erp/tbd-items` 立即从 3 条降为 2 条;`/api/events` 流同步收到 `data-change` 事件。legacy-id(示例产品)未受影响,21 个功能点、10 条待办照常解析。
+按计划 §5 剧本,共 11 步,全部通过(详见各步 ✅ 行)。SSE 验证:改 `student.md` 删一个 `[TBD]` 标记后,`/api/products/erp/tbd-items` 立即从 3 条降为 2 条;`/api/events` 流同步收到 `data-change` 事件。老结构产品未受影响,功能点和待办照常解析。
 
 ---
 

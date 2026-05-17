@@ -137,8 +137,8 @@ productsRouter.get("/:id", async (req, res, next) => {
 /**
  * GET /api/products/:id/extra-docs — 列出产品根目录下"未被结构化解析"的 .md。
  *
- * 用途:让 example-erp 这类把附加规格(SPEC-V1.md / SEAMS.md / DECISIONS.md / ...)
- * 放在产品目录的产品,在 Web 端 OverviewTab 也能看到这些文档,而不是只在文件系统能访问。
+ * 用途:让把附加规格(SPEC-V1.md / SEAMS.md / DECISIONS.md / ...)
+ * 放在产品根目录的产品,在 Web 端 OverviewTab 也能看到这些文档,而不是只在文件系统能访问。
  *
  * 排除清单:
  *   - STATUS.md / SUMMARY.md — 已在概览/录入小结渲染

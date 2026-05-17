@@ -322,7 +322,7 @@ flowchart LR
 
 ---
 
-## 5. 完整示例（示例产品场景）
+## 5. 完整示例（学习类小程序场景）
 
 ### 5.1 输入（功能点摘录）
 
@@ -336,7 +336,7 @@ flowchart LR
 ### 5.2 期望输出（main.mmd 节选）
 
 ```mermaid
-%% Generated from data/products/legacy-id/modules/  · DO NOT EDIT HERE
+%% Generated from data/products/&lt;id&gt;/modules/  · DO NOT EDIT HERE
 %% Source of truth lives in feature points (功能点 tab).
 %% Generated at: 2026-05-16T14:23:00Z
 flowchart LR
@@ -434,7 +434,7 @@ YAML 列表，一条一个 question：
   module: <module-id>
   question: <一句话描述拿不准的点>
   trigger:
-    feature_path: <相对仓库根的路径,如 data/products/legacy-id/modules/learning/features/answer-question.md>
+    feature_path: <相对仓库根的路径,如 data/products/&lt;id&gt;/modules/learning/features/answer-question.md>
     original_text: <description 中触发该问题的原文引用,字面字符串>
   proposed-resolution: <Agent 倾向的处理建议,仅作参考,不会被任何下游消费>
 ```
@@ -496,7 +496,7 @@ grep -F -- "$original_text" "$feature_path"
 本 contract 由两个 Agent 共同消费，是接口契约。修改方式：
 
 1. 任何对 §2 §3 的修改 → **必须**伴随对生成 Agent 和派生 Agent 提示词的同步更新。
-2. 任何对 §6 边界的修改 → 必须重新跑一次任务 4 的回归（用 legacy-id 验证派生结果未退化）。
+2. 任何对 §6 边界的修改 → 必须重新跑一次任务 4 的回归（用样本产品验证派生结果未退化）。
 3. 任何对 §4 图类型的修改 → 必须验证现有 .mmd 文件能被新规则解析（或提供迁移脚本）。
 4. §1 §5 §7 是说明性内容，可独立更新。
 5. 修改本文档的 PR 标题前缀建议 `contract:`，便于 review 时优先看。

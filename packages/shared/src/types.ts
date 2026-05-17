@@ -28,9 +28,27 @@ export interface ProductMeta {
   repo?: string | null;
   /**
    * 简短产品描述。新建项目用(去掉 source_path 必填后,description 是必填字段)。
-   * 老产品(legacy-id/example-erp/atlas/erp)可缺失,UI 兜底用 tagline 或空字符串。
+   * 老产品可缺失,UI 兜底用 tagline 或空字符串。
    */
   description?: string;
+  /**
+   * 产品规格层(Layer 2)元事实扩展(Round 4 阶段 2 新增,全部可选)。
+   * 覆盖 v1 §0.1 关键事实表的 9 项内容,概览 tab 渲染。
+   */
+  /** 业主机构名 */
+  organization?: string | null;
+  /** 业务领域 */
+  business_domain?: string | null;
+  /** 场地/校区清单(多场地时使用) */
+  campuses?: string[];
+  /** 技术负责人(单人时 string;多人在 decision_makers 写明) */
+  tech_lead?: string | null;
+  /** 决策方清单 */
+  decision_makers?: string[];
+  /** 当前推进阶段一句话描述 */
+  roadmap_phase?: string | null;
+  /** 文档版本号(v1 / v2 / ...) */
+  doc_version?: string | null;
 }
 
 export interface GitCommit {
@@ -526,4 +544,36 @@ export interface RefineTask {
   startedAt: string | null;
   finishedAt: string | null;
   error: string | null;
+}
+
+/**
+ * 产品规格层(Layer 2)文件类别。
+ * 7 类标准文件,以"产品级横切信息"为主体,Atlas 自 v2 起承载。
+ */
+export type SpecFileKind =
+  | "decisions"
+  | "seams"
+  | "entities-ownership"
+  | "architectural-warnings"
+  | "evolution-principles"
+  | "ai-requirements"
+  | "risks";
+
+/** 产品规格层(Layer 2)单文件读取结果。文件不存在时 exists=false, content="". */
+export interface SpecFile {
+  kind: SpecFileKind;
+  filename: string;
+  exists: boolean;
+  content: string;
+  last_modified: string | null;
+}
+
+/**
+ * 产品愿景文件(Layer 1)。单文件 VISION.md,自由 markdown。
+ * 不结构化解析,概览 tab 在顶部完整渲染。
+ */
+export interface ProductVision {
+  exists: boolean;
+  content: string;
+  last_modified: string | null;
 }

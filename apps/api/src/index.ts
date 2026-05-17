@@ -15,7 +15,7 @@ import { gitRouter } from "./routes/git";
 import { tasksRouter } from "./routes/tasks";
 import { intakeRouter } from "./routes/intake";
 import { productsRouter } from "./routes/products";
-import { specRouter } from "./routes/spec";
+import { productSpecRouter, specRouter } from "./routes/spec";
 import { DATA_ROOT } from "./services/fileReader";
 import { getDataVersion, onDataChange, startDataWatcher } from "./services/watcher";
 
@@ -58,6 +58,7 @@ app.use("/api/products/:id/global-feedback", globalFeedbackRouter);
 app.use("/api/products/:id", promptsRouter);
 app.use("/api/products/:id/designs", designsRouter);
 app.use("/api/products/:id", productAuxRouter);
+app.use("/api/products/:id", productSpecRouter);
 app.use("/api/products", productsRouter);
 app.use("/api/tasks", tasksRouter);
 app.use("/api/contracts", contractsRouter);
