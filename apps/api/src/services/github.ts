@@ -36,6 +36,45 @@ async function ghApi<T>(args: string[]): Promise<T> {
   return JSON.parse(stdout) as T;
 }
 
+export class GitHubIssueError extends Error {
+  constructor(message: string, public readonly code: "no-repo" | "gh-missing" | "gh-error") {
+    super(message);
+  }
+}
+
+/**
+ * 调 `gh issue create -R <repo> --title ... --body ...` 创建一个 issue。
+ * 返回 url + number。失败抛 GitHubIssueError。
+ */
+export async function createIssue(
+  rawRepo: string | null | undefined,
+  payload: { title: string; body: string; labels?: string[] }
+): Promise<{ url: string; number: number }> {
+  const repo = parseRepoIdent(rawRepo);
+  if (!repo) {
+    throw new GitHubIssueError("该产品 meta.yml 未配置 repo,无法创建 issue", "no-repo");
+  }
+  const args = ["issue", "create", "-R", repo, "--title", payload.title, "--body", payload.body];
+  for (const label of payload.labels ?? []) {
+    if (label) args.push("--label", label);
+  }
+  let stdout: string;
+  try {
+    const result = await exec("gh", args, { maxBuffer: 1024 * 1024 });
+    stdout = result.stdout;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    if (/not found|ENOENT/i.test(detail)) {
+      throw new GitHubIssueError("未安装 gh CLI", "gh-missing");
+    }
+    throw new GitHubIssueError(detail.split("\n").slice(-3).join("\n"), "gh-error");
+  }
+  const url = stdout.trim().split("\n").find((l) => l.startsWith("http")) ?? stdout.trim();
+  const m = url.match(/\/issues\/(\d+)(?:\D|$)/);
+  const number = m ? Number(m[1]) : NaN;
+  return { url, number };
+}
+
 /**
  * 读取产品的 GitHub 概况:默认分支、最近 PR、最近 issue。
  * 调用方负责传入 meta.repo 原始字符串;本函数自己解析、校验 gh 是否可用、捕获各类失败。

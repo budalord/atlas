@@ -1,28 +1,27 @@
 import { useEffect } from "react";
-import { BrowserRouter, NavLink, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { AgentInbox } from "./components/AgentInbox";
-import { AICatalog } from "./components/AICatalog";
 import { ContractList } from "./components/ContractList";
-import { DesignTrack } from "./components/DesignTrack";
 import { ProductDetail } from "./components/ProductDetail";
 import { ProductList } from "./components/ProductList";
-import { TodoBoard } from "./components/TodoBoard";
+import { TaskQueueWidget } from "./components/TaskQueueWidget";
+import { subscribeDataChange } from "./lib/dataChangeBus";
 import { IntakeDetail } from "./pages/IntakeDetail";
-import { IntakeHome } from "./pages/IntakeHome";
 import { useIntakeStore } from "./stores/intakeStore";
 import { useProductStore } from "./stores/productStore";
+import { useUiStore } from "./stores/uiStore";
 
 export default function App() {
   const fetchIntakeList = useIntakeStore((s) => s.fetchList);
 
   useEffect(() => {
     void fetchIntakeList();
-    const events = new EventSource("/api/events");
-    events.addEventListener("data-change", () => {
+    return subscribeDataChange(() => {
       void useIntakeStore.getState().fetchList();
     });
-    return () => events.close();
   }, [fetchIntakeList]);
+
+  const requestFeatureOpen = useUiStore((s) => s.requestFeatureOpen);
 
   return (
     <BrowserRouter>
@@ -30,9 +29,11 @@ export default function App() {
         <AppHeader />
         <Routes>
           <Route element={<OverviewPage />} path="/" />
-          <Route element={<IntakeHome />} path="/intake" />
           <Route element={<IntakeDetail />} path="/intake/:id" />
         </Routes>
+        <TaskQueueWidget
+          onOpenFeature={(productId, featureId) => requestFeatureOpen(productId, featureId)}
+        />
       </div>
     </BrowserRouter>
   );
@@ -40,13 +41,7 @@ export default function App() {
 
 function AppHeader() {
   const products = useProductStore((s) => s.products);
-  const intakeCount = useIntakeStore((s) => s.list.length);
   const activeProducts = products.filter((product) => product.meta.status === "in-progress").length;
-
-  const linkClass = ({ isActive }: { isActive: boolean }) =>
-    `rounded-md px-3 py-1.5 text-sm transition ${
-      isActive ? "bg-slate-950 text-white" : "text-slate-700 hover:bg-slate-100"
-    }`;
 
   return (
     <header className="border-b border-slate-200 bg-white px-5 py-4">
@@ -56,14 +51,6 @@ function AppHeader() {
             <div className="text-xs font-medium uppercase tracking-wide text-cyan-700">Agent-native spec hub</div>
             <h1 className="mt-1 text-xl font-semibold">Atlas</h1>
           </div>
-          <nav className="flex items-center gap-1">
-            <NavLink className={linkClass} end to="/">
-              产品总览
-            </NavLink>
-            <NavLink className={linkClass} to="/intake">
-              录入{intakeCount > 0 ? ` (${intakeCount})` : ""}
-            </NavLink>
-          </nav>
         </div>
         <div className="text-xs text-slate-500">
           <span className="font-semibold text-slate-900">{products.length}</span> 个产品
@@ -87,11 +74,9 @@ function OverviewPage() {
 
   useEffect(() => {
     void fetchAll();
-    const events = new EventSource("/api/events");
-    events.addEventListener("data-change", () => {
+    return subscribeDataChange(() => {
       void useProductStore.getState().fetchAll();
     });
-    return () => events.close();
   }, [fetchAll]);
 
   const selectedProduct = products.find((product) => product.id === selectedProductId) ?? null;
@@ -108,9 +93,6 @@ function OverviewPage() {
         ) : (
           <ProductDetail product={selectedProduct} />
         )}
-        <TodoBoard />
-        <DesignTrack />
-        <AICatalog />
       </div>
       <aside className="min-h-0 overflow-auto border-t border-slate-200 bg-white xl:border-l xl:border-t-0">
         <ContractList contracts={contracts} />

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ApiEnvelope, ClaudeDoc, Contract, Product } from "../types";
+import type { ApiEnvelope, ClaudeDoc, Contract, Product, ProductStatus } from "../types";
 
 interface ProductState {
   products: Product[];
@@ -11,6 +11,7 @@ interface ProductState {
   error: string | null;
   fetchAll: () => Promise<void>;
   selectProduct: (id: string) => void;
+  patchStatus: (id: string, status: ProductStatus) => Promise<void>;
 }
 
 export const useProductStore = create<ProductState>((set, get) => ({
@@ -50,7 +51,19 @@ export const useProductStore = create<ProductState>((set, get) => ({
       });
     }
   },
-  selectProduct: (id) => set({ selectedProductId: id })
+  selectProduct: (id) => set({ selectedProductId: id }),
+  patchStatus: async (id, status) => {
+    const res = await fetch(`/api/products/${id}/status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status })
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error ?? `HTTP ${res.status}`);
+    }
+    await get().fetchAll();
+  }
 }));
 
 async function fetchJson<T>(url: string): Promise<T> {

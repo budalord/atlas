@@ -1,0 +1,37 @@
+# Atlas 全局角色注册表
+# 角色是无状态的身份类型。状态机属于实体层，不属于角色。
+# 修改本文件 → 所有产品的功能点 roles 字段约束随之变。
+# 功能点 frontmatter 的 roles 数组只存这里列出的 id（kebab-case），
+# 显示名（中文 name）由前端查表渲染。
+version: 1
+roles:
+  - id: student
+    name: 学生
+    note: 接受教学服务的最终用户
+  - id: parent
+    name: 家长
+    note: 学生监护人/付费人
+  - id: teacher
+    name: 老师
+    note: 授课/批改
+  - id: sales
+    name: 销售
+    note: 招生/订单
+  - id: academic
+    name: 教务
+    note: 排课/学籍
+  - id: finance
+    name: 财务
+    note: 收款/退款/对账
+  - id: admin
+    name: 管理员
+    note: 系统配置/权限分配
+  - id: jiaowu
+    name: 教务老师
+    note: 教务系统主驾驶 · 资源调度者(原班主任+答疑老师合并)
+  - id: partner
+    name: 合作商
+    note: 外部销售 · 在系统内有账号 · 学员决定校区(机构层)
+  - id: principal
+    name: 校长
+    note: 全局视野 · 跨校区 · 关键决策

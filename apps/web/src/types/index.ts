@@ -17,5 +17,37 @@ export type {
   ProductMeta,
   ProductStatus,
   ProductTheme,
-  TodoItem
+  TodoItem,
+  EntitySpec,
+  FieldSpec,
+  RelationSpec,
+  DecisionSpec,
+  ModuleSpec,
+  ModuleColor,
+  ModuleGroup,
+  ModuleWithFeatures,
+  FieldRequired,
+  FeaturePoint,
+  FeaturePointPreview,
+  FeatureClue,
+  RefineTask,
+  TaskStage,
+  DesignDoc,
+  DesignSummary,
+  // 批次 1' · 反馈池(精简后只剩 id/date/content)
+  Feedback,
+  // 批次 3' · 全局需求池
+  GlobalFeedback,
+  GlobalFeedbackScope,
+  GlobalFeedbackData,
+  // feature-source-contract 三种约束承载
+  FeatureFieldRow,
+  StateTransitionRow,
+  FieldPermissionRow,
+  // 全局角色注册表(data/roles.yml)
+  RoleDef,
+  RolesRegistry,
+  // 流程图 derived 数据 (data/products/<id>/derived/flowcharts/)
+  FlowchartData,
+  FlowchartQuestion
 } from "@atlas/shared";

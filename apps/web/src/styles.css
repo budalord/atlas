@@ -87,3 +87,15 @@ body {
   max-width: 100%;
   height: auto;
 }
+
+/* 批次 5' 补丁 R4 · markmap 节点 hover 反馈 */
+.markmap-node {
+  cursor: pointer;
+}
+.markmap-node:hover foreignObject > div {
+  background: rgba(15, 23, 42, 0.05);
+  border-radius: 3px;
+}
+.markmap-node:hover text {
+  text-decoration: underline;
+}

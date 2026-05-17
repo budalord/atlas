@@ -23,7 +23,7 @@ export function ProductCard({ product, active, onSelect }: ProductCardProps) {
           <div className="text-sm font-semibold text-slate-950">{product.meta.name}</div>
           <div className="mt-1 text-xs text-slate-500">{product.id}</div>
         </div>
-        <span className={`shrink-0 rounded border px-2 py-1 text-[11px] ${statusChipClass(product.meta.status)}`}>
+        <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] ${statusChipClass(product.meta.status)}`}>
           {product.meta.status}
         </span>
       </div>

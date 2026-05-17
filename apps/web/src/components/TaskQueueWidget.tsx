@@ -1,0 +1,222 @@
+import { useEffect, useMemo, useState } from "react";
+import type { ApiEnvelope, RefineTask, TaskStage } from "../types";
+import { useDataChange } from "../lib/useDataChange";
+import { useProductStore } from "../stores/productStore";
+
+/**
+ * 右下角浮动队列指示器。
+ * 折叠态:小圆角 chip,显示活动任务计数 + 状态色;
+ * 展开态:列出 running / queued / awaiting_review / 最近完成 几段。
+ * 点 awaiting_review 行跳转到对应产品(切到 features tab,打开抽屉)。
+ */
+export function TaskQueueWidget({
+  onOpenFeature
+}: {
+  onOpenFeature: (productId: string, featureId: string) => void;
+}) {
+  const [tasks, setTasks] = useState<RefineTask[]>([]);
+  const [open, setOpen] = useState(false);
+  const selectProduct = useProductStore((s) => s.selectProduct);
+
+  const load = async () => {
+    try {
+      const res = await fetch("/api/tasks");
+      if (!res.ok) return;
+      const json = (await res.json()) as ApiEnvelope<RefineTask[]>;
+      setTasks(json.data);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, []);
+  useDataChange(() => {
+    void load();
+  });
+
+  const buckets = useMemo(() => {
+    const running = tasks.filter((t) => t.stage === "running");
+    const queued = tasks.filter((t) => t.stage === "queued");
+    const review = tasks.filter((t) => t.stage === "awaiting_review");
+    const recent = tasks
+      .filter((t) => t.stage === "completed" || t.stage === "rejected" || t.stage === "failed")
+      .sort((a, b) => (b.finishedAt ?? "").localeCompare(a.finishedAt ?? ""))
+      .slice(0, 5);
+    return { running, queued, review, recent };
+  }, [tasks]);
+
+  const activeCount = buckets.running.length + buckets.queued.length + buckets.review.length;
+  if (activeCount === 0 && buckets.recent.length === 0) return null;
+
+  return (
+    <div className="fixed bottom-4 right-4 z-30">
+      {open ? (
+        <div className="w-[320px] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl">
+          <header className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-2">
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              🤖 任务队列
+              {activeCount > 0 ? (
+                <span className="rounded bg-indigo-600 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                  {activeCount}
+                </span>
+              ) : null}
+            </div>
+            <button
+              className="text-slate-500 hover:text-slate-900"
+              onClick={() => setOpen(false)}
+              type="button"
+            >
+              ✕
+            </button>
+          </header>
+          <div className="max-h-[420px] overflow-auto p-2 text-xs">
+            {buckets.running.length === 0 &&
+            buckets.queued.length === 0 &&
+            buckets.review.length === 0 ? (
+              <div className="py-2 text-center text-slate-500">暂无活动任务</div>
+            ) : null}
+            <Bucket
+              color="amber"
+              label="running"
+              onSelect={(t) => {
+                selectProduct(t.productId);
+                onOpenFeature(t.productId, t.featureId);
+              }}
+              tasks={buckets.running}
+            />
+            <Bucket
+              color="slate"
+              label="queued"
+              onSelect={(t) => {
+                selectProduct(t.productId);
+                onOpenFeature(t.productId, t.featureId);
+              }}
+              tasks={buckets.queued}
+            />
+            <Bucket
+              color="indigo"
+              label="awaiting_review"
+              onSelect={(t) => {
+                selectProduct(t.productId);
+                onOpenFeature(t.productId, t.featureId);
+              }}
+              tasks={buckets.review}
+            />
+            {buckets.recent.length > 0 ? (
+              <>
+                <div className="mt-3 mb-1 text-[10px] font-semibold uppercase text-slate-500">
+                  最近完成
+                </div>
+                <ul className="space-y-1">
+                  {buckets.recent.map((t) => (
+                    <li
+                      className="rounded border border-slate-200 bg-white px-2 py-1.5"
+                      key={t.id}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="truncate text-slate-900">{t.featureName}</span>
+                        <StageDot stage={t.stage} />
+                      </div>
+                      <div className="text-[10px] text-slate-500">{t.productId}</div>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
+          </div>
+        </div>
+      ) : (
+        <button
+          className={`flex items-center gap-2 rounded-full border bg-white px-3 py-2 text-sm shadow-lg transition hover:shadow-xl ${
+            buckets.review.length > 0
+              ? "border-indigo-300 text-indigo-800"
+              : buckets.running.length > 0
+              ? "border-amber-300 text-amber-800"
+              : "border-slate-300 text-slate-700"
+          }`}
+          onClick={() => setOpen(true)}
+          type="button"
+        >
+          <span>🤖</span>
+          {buckets.running.length > 0 ? <Spinner /> : null}
+          <span className="font-medium">
+            {buckets.review.length > 0
+              ? `${buckets.review.length} 待审`
+              : buckets.running.length > 0
+              ? "running"
+              : buckets.queued.length > 0
+              ? `${buckets.queued.length} 排队`
+              : `${buckets.recent.length} 完成`}
+          </span>
+        </button>
+      )}
+    </div>
+  );
+}
+
+function Bucket({
+  label,
+  tasks,
+  color,
+  onSelect
+}: {
+  label: string;
+  tasks: RefineTask[];
+  color: "amber" | "slate" | "indigo";
+  onSelect: (t: RefineTask) => void;
+}) {
+  if (tasks.length === 0) return null;
+  const colorMap = {
+    amber: "border-amber-200 bg-amber-50/60 text-amber-900",
+    slate: "border-slate-200 bg-slate-50 text-slate-800",
+    indigo: "border-indigo-300 bg-indigo-50/70 text-indigo-900"
+  } as const;
+  return (
+    <div className="mb-2">
+      <div className="mb-1 text-[10px] font-semibold uppercase text-slate-500">{label}</div>
+      <ul className="space-y-1">
+        {tasks.map((t) => (
+          <li key={t.id}>
+            <button
+              className={`flex w-full items-center justify-between rounded border px-2 py-1.5 text-left transition hover:opacity-80 ${colorMap[color]}`}
+              onClick={() => onSelect(t)}
+              type="button"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium">{t.featureName}</div>
+                <div className="text-[10px] opacity-75">{t.productId}</div>
+              </div>
+              <StageDot stage={t.stage} />
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function StageDot({ stage }: { stage: TaskStage }) {
+  const map: Record<TaskStage, { color: string; label: string }> = {
+    queued: { color: "bg-slate-400", label: "排队" },
+    running: { color: "bg-amber-500 animate-pulse", label: "running" },
+    awaiting_review: { color: "bg-indigo-500", label: "待审" },
+    completed: { color: "bg-emerald-500", label: "完成" },
+    rejected: { color: "bg-rose-400", label: "拒绝" },
+    failed: { color: "bg-rose-600", label: "失败" }
+  };
+  const cfg = map[stage];
+  return (
+    <span className="flex items-center gap-1 text-[10px]">
+      <span className={`h-2 w-2 rounded-full ${cfg.color}`} />
+      {cfg.label}
+    </span>
+  );
+}
+
+function Spinner() {
+  return (
+    <span className="inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-current border-r-transparent" />
+  );
+}

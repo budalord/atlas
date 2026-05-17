@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { IntakeProgress, stageLabel, stageNumber } from "../components/IntakeProgress";
 import { IntakeStageCard, type StageState } from "../components/IntakeStageCard";
+import { subscribeDataChange } from "../lib/dataChangeBus";
 import { useIntakeStore } from "../stores/intakeStore";
 import type { IntakePrompts, IntakeStageResponse } from "../types";
 
@@ -63,11 +64,9 @@ export function IntakeDetail() {
 
   useEffect(() => {
     void refresh();
-    const events = new EventSource("/api/events");
-    events.addEventListener("data-change", () => {
+    return subscribeDataChange(() => {
       void refresh();
     });
-    return () => events.close();
   }, [refresh]);
 
   // Auto-complete + auto-navigate when finalized

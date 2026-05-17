@@ -60,7 +60,8 @@ export function normalizeProductMeta(meta: ProductMeta): ProductMeta {
     tech_stack: Array.isArray(meta.tech_stack) ? meta.tech_stack : [],
     deploy_url: meta.deploy_url ?? null,
     tagline: meta.tagline ?? null,
-    repo: meta.repo ?? null
+    repo: meta.repo ?? null,
+    ...(meta.description !== undefined ? { description: meta.description } : {})
   };
 }
 
@@ -68,7 +69,11 @@ function extractSection(markdown: string, heading: string) {
   const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const level = heading.startsWith("##") ? "##" : "#";
   const nextHeading = level === "##" ? "\\n##\\s+" : "\\n#\\s+";
-  const match = markdown.match(new RegExp(`${escaped}\\s*\\n([\\s\\S]*?)(?=${nextHeading}|$)`));
+  // 注意:行尾用 `[^\n]*\n` 而不是 `\s*\n`,后者会贪婪消耗下一节前的空行,
+  // 把 "\n##" 边界标记吞掉,导致跨节匹配。
+  const match = markdown.match(
+    new RegExp(`${escaped}[^\\n]*\\n([\\s\\S]*?)(?=${nextHeading}|$)`)
+  );
   return match?.[1]?.trim() ?? "";
 }
 

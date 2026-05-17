@@ -82,7 +82,7 @@ intakeRouter.post("/start", async (req, res, next) => {
         id,
         name,
         theme: meta.theme,
-        source_path: meta.source_path,
+        source_path: meta.source_path ?? "",
         created_at: meta.created_at,
         stage: status.stage
       } satisfies IntakeListItem,
@@ -108,7 +108,7 @@ intakeRouter.get("/list", async (_req, res, next) => {
         id,
         name: meta.name,
         theme: meta.theme,
-        source_path: meta.source_path,
+        source_path: meta.source_path ?? "",
         created_at: meta.created_at,
         stage
       });
@@ -154,7 +154,7 @@ intakeRouter.get("/:id/prompts", async (req, res, next) => {
         discover: intakeDiscoverPrompt({
           id: meta.id,
           name: meta.name,
-          sourcePath: meta.source_path,
+          sourcePath: meta.source_path ?? "",
           theme: meta.theme,
           atlasPath
         }),

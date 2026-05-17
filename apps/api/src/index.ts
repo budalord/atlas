@@ -4,9 +4,18 @@ import { aiRouter } from "./routes/ai";
 import { agentsRouter } from "./routes/agents";
 import { contractsRouter } from "./routes/contracts";
 import { designsRouter } from "./routes/designs";
+import { entitiesRouter, productAuxRouter } from "./routes/entities";
+import { feedbackRouter } from "./routes/feedback";
+import { featuresRouter } from "./routes/features";
+import { flowchartsRouter } from "./routes/flowcharts";
+import { globalFeedbackRouter } from "./routes/globalFeedback";
+import { promptsRouter } from "./routes/prompts";
+import { rolesRouter } from "./routes/roles";
 import { gitRouter } from "./routes/git";
+import { tasksRouter } from "./routes/tasks";
 import { intakeRouter } from "./routes/intake";
 import { productsRouter } from "./routes/products";
+import { specRouter } from "./routes/spec";
 import { DATA_ROOT } from "./services/fileReader";
 import { getDataVersion, onDataChange, startDataWatcher } from "./services/watcher";
 
@@ -14,7 +23,7 @@ const app = express();
 const port = Number(process.env.PORT ?? 3001);
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "5mb" }));
 
 app.get("/api/health", (_req, res) => {
   res.json({
@@ -41,12 +50,22 @@ app.get("/api/events", (req, res) => {
   });
 });
 
+app.use("/api/products/:id/entities", entitiesRouter);
+app.use("/api/products/:id/features", featuresRouter);
+app.use("/api/products/:id/flowchart", flowchartsRouter);
+app.use("/api/products/:id/feedback", feedbackRouter);
+app.use("/api/products/:id/global-feedback", globalFeedbackRouter);
+app.use("/api/products/:id", promptsRouter);
+app.use("/api/products/:id/designs", designsRouter);
+app.use("/api/products/:id", productAuxRouter);
 app.use("/api/products", productsRouter);
+app.use("/api/tasks", tasksRouter);
 app.use("/api/contracts", contractsRouter);
-app.use("/api/designs", designsRouter);
 app.use("/api/agents", agentsRouter);
 app.use("/api/ai", aiRouter);
+app.use("/api/roles", rolesRouter);
 app.use("/api/intake", intakeRouter);
+app.use("/api/spec", specRouter);
 app.use("/api", gitRouter);
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

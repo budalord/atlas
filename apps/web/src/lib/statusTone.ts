@@ -2,7 +2,15 @@
  * 把功能点 / 产品的 status 文本归一化为一个语义类别,用于上色。
  * status 来源是用户写在 markdown 里的字符串,可能含 markdown 标记或括号备注。
  */
-export type StatusTone = "live" | "doing" | "planned" | "blocked" | "deprecated" | "canceled" | "neutral";
+export type StatusTone =
+  | "live"
+  | "doing"
+  | "planned"
+  | "planning"
+  | "blocked"
+  | "deprecated"
+  | "canceled"
+  | "neutral";
 
 interface ToneStyle {
   /** 整个 chip 的 tailwind 类(bg + text + border) */
@@ -23,6 +31,10 @@ const TONE_STYLES: Record<StatusTone, ToneStyle> = {
   planned: {
     chip: "border-sky-200 bg-sky-50 text-sky-800",
     text: "text-sky-700"
+  },
+  planning: {
+    chip: "border-indigo-300 bg-indigo-50 text-indigo-800",
+    text: "text-indigo-700"
   },
   blocked: {
     chip: "border-rose-200 bg-rose-50 text-rose-800",
@@ -51,6 +63,7 @@ export function classifyStatus(raw: string | null | undefined): StatusTone {
   if (!s) return "neutral";
 
   if (/^(live|done|完成|已上线|已实现)/.test(s) || s.includes("live")) return "live";
+  if (/^planning$/.test(s) || s.includes("立项")) return "planning";
   if (/^(doing|in[- ]?progress|重构|进行|partial|manual)/.test(s) || s.includes("重构") || s.includes("doing") || s.includes("partial")) return "doing";
   if (/^(blocked|paused|阻塞|暂停)/.test(s)) return "blocked";
   if (/^(planned|todo|计划|待办)/.test(s)) return "planned";
