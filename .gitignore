@@ -12,3 +12,7 @@ data/products/*
 !data/products/atlas/
 !data/products/example-*/
 docs/experiments/
+
+# 具体项目素材库(真实业务规格补充)不入库 — Atlas 仓库只保留架构与契约文档
+docs/erp-补充/
+docs/*-补充/

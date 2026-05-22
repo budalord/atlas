@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ApiEnvelope, FlowchartData, FlowchartQuestion } from "../types";
+import type {
+  ApiEnvelope,
+  FlowchartQuestion,
+  ModuleFlowchartData,
+  ModuleFlowchartListData
+} from "../types";
 import { MermaidBlock } from "./MermaidBlock";
 import { PromptModalDialog } from "./PromptModalDialog";
 
@@ -10,63 +15,102 @@ interface FlowchartViewProps {
 }
 
 /**
- * 流程图视图(衍生产物,只读)。
+ * 决策者流程图视图(per-module 切分版)。
  *
- * 三个原则:
- *  1. 任何编辑入口都不暴露 — Mermaid 节点不可拖动、不可改文案、无文本编辑器
- *  2. 流程图状态由 GET /api/products/:id/flowchart 完全决定;用户答复唯一路径是回功能点 tab 改 feature.md
- *  3. questions.md 是一等公民:横幅 + 跳转到 FeatureModal,闭合"模糊宁可缺"反馈循环
+ * 与老版(单 main.mmd + 角色 swimlane)的差异:
+ *  - 每个 module 一张 .mmd(节点 = feature,subgraph = module_group)
+ *  - tab UI 切换 7 个模块,避免 42 features 拍一张图爆炸
+ *  - 数据源:GET /api/products/:id/flowcharts/by-module
+ *  - questions.md 仍然是一等公民(聚合一份),横幅 + 跳转到 feature
+ *  - 任何编辑入口都不暴露(节点不可拖、不可改、无文本编辑)
+ *  - 生成 = 复制提示词 → Codex → 写文件 → 刷新
  */
 export function FlowchartView({ productId, onOpenFeature }: FlowchartViewProps) {
-  const [data, setData] = useState<FlowchartData | null>(null);
+  const [data, setData] = useState<ModuleFlowchartListData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [promptOpen, setPromptOpen] = useState(false);
   const [questionsExpanded, setQuestionsExpanded] = useState(false);
+  /** 当前 tab 选中的 moduleId;null = 默认选第一个有 mmd 的 module */
+  const [activeModuleId, setActiveModuleId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/products/${productId}/flowchart`);
+      const res = await fetch(`/api/products/${productId}/flowchart/by-module`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = (await res.json()) as ApiEnvelope<FlowchartData>;
+      const json = (await res.json()) as ApiEnvelope<ModuleFlowchartListData>;
       setData(json.data);
+      // 默认选第一个 exists 的 module(或第一个 module)
+      if (activeModuleId === null && json.data.modules.length > 0) {
+        const firstExisting = json.data.modules.find((m) => m.exists);
+        setActiveModuleId(firstExisting?.moduleId ?? json.data.modules[0].moduleId);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "加载失败");
     } finally {
       setLoading(false);
     }
-  }, [productId]);
+  }, [productId, activeModuleId]);
 
   useEffect(() => {
     void load();
-  }, [load]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productId]);
+
+  const activeModule = useMemo<ModuleFlowchartData | null>(() => {
+    if (!data || !activeModuleId) return null;
+    return data.modules.find((m) => m.moduleId === activeModuleId) ?? null;
+  }, [data, activeModuleId]);
 
   const questionsCount = data?.questions.length ?? 0;
   const lintOk = data?.questions_lint_ok ?? true;
   const lintErrors = data?.questions_lint_errors ?? [];
+  const totalModules = data?.modules.length ?? 0;
+  const existingCount = data?.modules.filter((m) => m.exists).length ?? 0;
+  const staleCount = data?.modules.filter((m) => m.stale).length ?? 0;
 
   return (
-    <div className="flex h-full flex-col bg-slate-50">
-      {/* 顶部固定提示条 — 强化"派生产物"语义 */}
+    <div className="flex min-h-0 flex-1 flex-col bg-slate-50">
+      {/* 顶部固定提示条 — 强化"派生产物 + 决策者视角"语义 */}
       <div className="border-b border-amber-200 bg-amber-50 px-5 py-2 text-[12px] text-amber-900">
-        ⚙ 此图由功能点 tab 派生,发现问题请回上面修改后重新生成。
+        ⚙ 决策者视角流程图(per-module 切分)· 派生自功能点 tab · 改 feature 后用 Codex 重新生成
       </div>
 
       {/* 操作行:左侧元信息 + 右侧按钮 */}
       <div className="flex items-center justify-between border-b border-slate-200 bg-white px-5 py-2 text-[12px] text-slate-600">
-        <FlowchartMeta data={data} loading={loading} error={error} />
+        <div className="flex items-center gap-2">
+          {loading ? (
+            <span className="text-slate-400">加载中...</span>
+          ) : error ? (
+            <span className="text-rose-600">{error}</span>
+          ) : data ? (
+            <>
+              <span>
+                <span className="font-medium text-slate-700">{existingCount}</span>/{totalModules} 模块已生成
+              </span>
+              {staleCount > 0 ? (
+                <span
+                  className="rounded border border-amber-400 bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-900"
+                  title="模块下 feature 有改动晚于流程图"
+                >
+                  ⚠ {staleCount} 个过期
+                </span>
+              ) : null}
+            </>
+          ) : null}
+        </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
             className={`rounded border px-3 py-1 text-[12px] font-medium ${
-              data?.stale
+              staleCount > 0 || existingCount < totalModules
                 ? "border-amber-400 bg-amber-100 text-amber-900 hover:bg-amber-200"
                 : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
             }`}
             onClick={() => setPromptOpen(true)}
-            title="把功能点+roles+contract 拼成 prompt 给 Codex/Claude 跑"
+            title="把全部功能点 + 触发后续 + 新 contract 拼成 prompt 给 Codex 跑"
           >
             📋 复制生成提示词
           </button>
@@ -74,14 +118,14 @@ export function FlowchartView({ productId, onOpenFeature }: FlowchartViewProps) 
             type="button"
             className="rounded border border-slate-300 bg-white px-3 py-1 text-[12px] text-slate-700 hover:bg-slate-50"
             onClick={() => void load()}
-            title="Agent 跑完后点这里重读 main.mmd"
+            title="Agent 跑完后点这里重读 by-module/*.mmd"
           >
             ↻ 刷新
           </button>
         </div>
       </div>
 
-      {/* questions.md 横幅 — 一等公民,缺被看到 → 用户回 source 修改 → 重生成验证 */}
+      {/* questions 横幅 — 一等公民 */}
       {questionsCount > 0 || !lintOk ? (
         <QuestionsBanner
           questions={data?.questions ?? []}
@@ -93,31 +137,57 @@ export function FlowchartView({ productId, onOpenFeature }: FlowchartViewProps) 
         />
       ) : null}
 
-      {/* 主区域:渲染 / 空状态 / 错误 / contract 违规 */}
+      {/* 模块 tab 选择器 */}
+      {data && data.modules.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-1 border-b border-slate-200 bg-white px-3 py-1.5">
+          {data.modules.map((m) => (
+            <ModuleTabButton
+              key={m.moduleId}
+              module={m}
+              active={m.moduleId === activeModuleId}
+              onClick={() => setActiveModuleId(m.moduleId)}
+            />
+          ))}
+        </div>
+      ) : null}
+
+      {/* 主区域:渲染选中的 module / 空状态 / 错误 */}
       <div className="flex-1 overflow-auto px-5 py-4">
-        {loading ? (
+        {loading && !data ? (
           <div className="py-10 text-center text-xs text-slate-500">加载中...</div>
-        ) : error ? (
+        ) : error && !data ? (
           <div className="rounded border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
             {error}
           </div>
-        ) : !data?.exists ? (
-          <EmptyState onOpenPrompt={() => setPromptOpen(true)} />
-        ) : !lintOk ? (
-          // contract §6.3 兜底机制失守 → 整份 .mmd 视作不可信(下游派生 Agent 也会拒绝消费)。
-          // 前端的信任判断必须和下游消费判断保持一致 —— 不渲染 mermaid,避免用户照着错图推进。
-          <ContractViolationPlaceholder
-            errorCount={lintErrors.length}
+        ) : !data || data.modules.length === 0 ? (
+          <EmptyNoModulesState />
+        ) : !activeModule ? (
+          <div className="text-xs text-slate-500">未选中模块</div>
+        ) : !activeModule.exists ? (
+          <EmptyModuleState
+            moduleData={activeModule}
             onOpenPrompt={() => setPromptOpen(true)}
           />
         ) : (
           <div
             className="rounded border border-slate-200 bg-white p-2"
-            // 阻止节点上任何拖拽/选择/双击 — 衍生产物不允许用户在 UI 上做任何修改语义的操作
             onContextMenu={(e) => e.preventDefault()}
             onDoubleClick={(e) => e.preventDefault()}
           >
-            <MermaidBlock code={data.mermaid ?? ""} />
+            <div className="border-b border-slate-100 px-3 py-1.5 text-[11px] text-slate-500">
+              {activeModule.moduleTitle || activeModule.moduleId} ·{" "}
+              <span className="font-medium text-slate-700">{activeModule.featureCount}</span> features ·
+              生成于 {formatGenerated(activeModule.generated_at)}
+              {activeModule.stale ? (
+                <span
+                  className="ml-2 rounded border border-amber-400 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-900"
+                  title={activeModule.stale_reason ?? undefined}
+                >
+                  ⚠ 已过期
+                </span>
+              ) : null}
+            </div>
+            <MermaidBlock code={activeModule.mermaid ?? ""} />
           </div>
         )}
       </div>
@@ -129,7 +199,6 @@ export function FlowchartView({ productId, onOpenFeature }: FlowchartViewProps) 
           productId={productId}
           onClose={() => {
             setPromptOpen(false);
-            // 用户跑完 Agent 后关闭 modal,这里顺手刷新一次拿最新 main.mmd
             void load();
           }}
         />
@@ -138,38 +207,48 @@ export function FlowchartView({ productId, onOpenFeature }: FlowchartViewProps) 
   );
 }
 
-function FlowchartMeta({
-  data,
-  loading,
-  error
-}: {
-  data: FlowchartData | null;
-  loading: boolean;
-  error: string | null;
-}) {
-  if (loading) return <span className="text-slate-400">加载中...</span>;
-  if (error) return <span className="text-rose-600">{error}</span>;
-  if (!data) return null;
-  if (!data.exists) {
-    return <span className="text-slate-400">尚未生成 main.mmd</span>;
-  }
-  const generatedAt = data.generated_at ? new Date(data.generated_at) : null;
-  const tsLabel = generatedAt
-    ? `${generatedAt.toLocaleString("zh-CN", { hour12: false })}`
-    : "未知时间";
+interface ModuleTabButtonProps {
+  module: ModuleFlowchartData;
+  active: boolean;
+  onClick: () => void;
+}
+
+function ModuleTabButton({ module: m, active, onClick }: ModuleTabButtonProps) {
+  // 视觉规则:active = 黑底白字 / exists = 白底 / 不存在 = 灰底 / stale 加 ⚠
+  const baseCls = "rounded px-2.5 py-1 text-[12px] font-medium transition-colors";
+  const colorCls = active
+    ? "bg-slate-900 text-white hover:bg-slate-800"
+    : m.exists
+      ? "border border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+      : "border border-dashed border-slate-300 bg-slate-50 text-slate-400 hover:bg-white";
   return (
-    <div className="flex items-center gap-2">
-      <span>上次生成: {tsLabel}</span>
-      {data.stale ? (
-        <span
-          className="rounded border border-amber-400 bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-900"
-          title={data.stale_reason ?? undefined}
-        >
-          ⚠ 已过期
-        </span>
-      ) : null}
-    </div>
+    <button
+      type="button"
+      className={`${baseCls} ${colorCls}`}
+      onClick={onClick}
+      title={
+        m.exists
+          ? `${m.featureCount} features${m.stale ? " · 已过期" : ""}`
+          : `${m.featureCount} features · 尚未生成 .mmd`
+      }
+    >
+      <span>{m.moduleTitle || m.moduleId}</span>
+      <span className={`ml-1.5 rounded px-1 text-[10px] ${active ? "bg-slate-700 text-slate-200" : "bg-slate-100 text-slate-500"}`}>
+        {m.featureCount}
+      </span>
+      {m.stale ? <span className="ml-1 text-[10px]">⚠</span> : null}
+      {!m.exists ? <span className="ml-1 text-[10px]">·空</span> : null}
+    </button>
   );
+}
+
+function formatGenerated(iso: string | null): string {
+  if (!iso) return "未知时间";
+  try {
+    return new Date(iso).toLocaleString("zh-CN", { hour12: false });
+  } catch {
+    return iso;
+  }
 }
 
 interface QuestionsBannerProps {
@@ -201,20 +280,15 @@ function QuestionsBanner({
       >
         <span>
           {!lintOk ? (
-            <>
-              ⛔ 流程图产出含非法 question(trigger 引文与 feature.md 不匹配,
-              共 {lintErrors.length} 条),需重跑或人工 review
-            </>
+            <>⛔ Questions 含非法 trigger(共 {lintErrors.length} 条),需修后重跑</>
           ) : (
             <>⚠ {questions.length} 个问题待澄清,可能影响流程图完整性</>
           )}
         </span>
-        <span className="text-[11px] opacity-70">
-          {expanded ? "收起 ▲" : "展开 ▼"}
-        </span>
+        <span className="text-[11px] opacity-70">{expanded ? "收起 ▲" : "展开 ▼"}</span>
       </button>
       {expanded ? (
-        <div className="space-y-2 px-5 pb-3 text-[12px]">
+        <div className="max-h-[40vh] space-y-2 overflow-auto px-5 pb-3 text-[12px]">
           {!lintOk
             ? lintErrors.map((err, i) => (
                 <div
@@ -226,7 +300,11 @@ function QuestionsBanner({
               ))
             : null}
           {questions.map((q) => (
-            <QuestionCard key={`${q.feature}-${q.question.slice(0, 24)}`} q={q} onOpenFeature={onOpenFeature} />
+            <QuestionCard
+              key={`${q.feature}-${q.question.slice(0, 24)}`}
+              q={q}
+              onOpenFeature={onOpenFeature}
+            />
           ))}
         </div>
       ) : null}
@@ -266,7 +344,7 @@ function QuestionCard({
             type="button"
             className="rounded border border-slate-300 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-700 hover:bg-white"
             onClick={() => onOpenFeature(featureFile.moduleId, featureFile.featureId)}
-            title="跳到对应 feature,修改 description/roles 后回流程图重新生成"
+            title="跳到对应 feature,修改后回流程图重新生成"
           >
             打开功能点 → {featureFile.moduleId} / {featureFile.featureId}
           </button>
@@ -280,47 +358,36 @@ function QuestionCard({
   );
 }
 
-function ContractViolationPlaceholder({
-  errorCount,
-  onOpenPrompt
-}: {
-  errorCount: number;
-  onOpenPrompt: () => void;
-}) {
+function EmptyNoModulesState() {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-4 rounded border-2 border-rose-300 bg-rose-50 py-16 text-rose-900">
-      <div className="text-base font-semibold">⛔ Contract 违规,流程图整体不可信</div>
-      <div className="max-w-lg text-center text-[12px] leading-5 text-rose-700">
-        main.questions.md 中有 <span className="font-semibold">{errorCount}</span>{" "}
-        条 question 的 trigger.original_text 在对应 feature.md 中 grep 不到——这意味着
-        Agent 编造了 description 里不存在的原文,触发了 contract §6.3.4 lint 失败。
-        <br />
-        <br />
-        Per contract §6.3:整份 main.mmd 在下游派生 Agent 处也会被拒绝消费,故前端
-        不渲染流程图,避免你照着错图推进。展开上方红色横幅查看具体非法条目,然后重跑生成。
-      </div>
-      <button
-        type="button"
-        className="rounded-lg border-2 border-rose-700 bg-white px-5 py-2 text-sm font-semibold text-rose-900 hover:bg-rose-700 hover:text-white"
-        onClick={onOpenPrompt}
-      >
-        📋 复制生成提示词重跑
-      </button>
+    <div className="flex h-full flex-col items-center justify-center gap-2 py-16 text-slate-500">
+      <div className="text-sm">该产品没有模块/功能点树</div>
+      <div className="text-xs">先去功能点 tab 建模块和 feature</div>
     </div>
   );
 }
 
-function EmptyState({ onOpenPrompt }: { onOpenPrompt: () => void }) {
+function EmptyModuleState({
+  moduleData,
+  onOpenPrompt
+}: {
+  moduleData: ModuleFlowchartData;
+  onOpenPrompt: () => void;
+}) {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-4 py-16 text-slate-500">
-      <div className="text-sm">还没有生成过流程图</div>
+    <div className="flex h-full flex-col items-center justify-center gap-3 py-12 text-slate-500">
+      <div className="text-sm font-medium text-slate-700">
+        {moduleData.moduleTitle || moduleData.moduleId} 还没有 .mmd
+      </div>
       <div className="max-w-md text-center text-xs leading-5 text-slate-400">
-        点右上角 <span className="font-medium text-slate-700">📋 复制生成提示词</span>{" "}
-        → 用 Codex/Claude 跑完 → 回来点 ↻ 刷新
+        该模块下有 {moduleData.featureCount} 个 feature,但流程图尚未生成。
+        <br />
+        点右上角 <span className="font-medium text-slate-700">📋 复制生成提示词</span> →
+        让 Codex 跑完 → 回来点 ↻ 刷新。
       </div>
       <button
         type="button"
-        className="rounded-lg border-2 border-slate-900 bg-white px-5 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-900 hover:text-white"
+        className="rounded-lg border-2 border-slate-900 bg-white px-4 py-1.5 text-xs font-semibold text-slate-900 hover:bg-slate-900 hover:text-white"
         onClick={onOpenPrompt}
       >
         📋 复制生成提示词

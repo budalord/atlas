@@ -343,6 +343,19 @@ export interface FeaturePoint {
   last_refined_at: string | null;
   /** "## 描述" section 正文 */
   description: string;
+  /**
+   * "## 给决策者" section 正文(决策者视角的白话描述)。
+   * 优先展示给校长/学长等决策者审阅,Agent 也读但写功能点 md 时主要参考 description。
+   * 缺段 → 空字符串。
+   */
+  decision_maker_view: string;
+  /**
+   * frontmatter reviewed_at:决策者标记"已审阅"的日期(YYYY-MM-DD)。
+   * 存在 = 已审;不存在 = 待审。删字段即"重新待审"。
+   */
+  reviewed_at?: string;
+  /** 可选审计追溯:谁标的已审。 */
+  reviewed_by?: string;
   clues: {
     pending: FeatureClue[];
     resolved: FeatureClue[];
@@ -462,6 +475,39 @@ export interface FlowchartQuestion {
   proposed_resolution?: string;
 }
 
+/**
+ * 决策者流程图(per-module 切分版)· 单个 module 的数据。
+ * 对应文件 data/products/{id}/derived/flowcharts/by-module/{moduleId}.mmd
+ */
+export interface ModuleFlowchartData {
+  moduleId: string;
+  moduleName: string;
+  moduleTitle: string | null;
+  /** 该模块下的 feature 总数(参考 — 帮 UI 显示) */
+  featureCount: number;
+  /** mmd 文件内容;exists=false 时为 null */
+  mermaid: string | null;
+  exists: boolean;
+  /** "%% 生成时间: <iso>" 头部或文件 mtime */
+  generated_at: string | null;
+  /** features/*.md 或 MODULE.md 的最大 mtime > .mmd mtime → stale */
+  stale: boolean;
+  stale_reason: string | null;
+}
+
+/**
+ * 决策者流程图列表 + 聚合 questions。
+ * 对应 GET /api/products/:id/flowcharts/by-module
+ */
+export interface ModuleFlowchartListData {
+  /** 按 modules 顺序排列的每模块状态 */
+  modules: ModuleFlowchartData[];
+  /** 聚合 by-module/questions.md;空数组 = 无 questions */
+  questions: FlowchartQuestion[];
+  questions_lint_ok: boolean;
+  questions_lint_errors: string[];
+}
+
 /** GET /api/products/:id/flowchart 的响应 data 字段。 */
 export interface FlowchartData {
   /** main.mmd 内容;exists=false 时为 null */
@@ -509,6 +555,21 @@ export interface FeaturePointPreview {
   feedbackCount: number;
   /** frontmatter needs_revision 快照;markmap 节点上贴 ⚠ */
   needs_revision: boolean;
+  /**
+   * "## 给决策者" section 正文(从 FeaturePoint 透传)。
+   * markmap hover 浮卡用 — 免去二次请求。
+   * 缺段 → 空字符串。
+   */
+  decisionMakerView: string;
+  /**
+   * frontmatter reviewed_at(YYYY-MM-DD)。存在 = ✅ 已审徽章;不存在 = 待审。
+   */
+  reviewed_at?: string;
+  /**
+   * 创建日期(从 frontmatter.created_at 透传)。
+   * markmap 用来判定 🆕 徽章(7 天内 + 未审阅 → 新增)。
+   */
+  created_at: string;
   /** 参与角色的 id 列表(从 frontmatter.roles 透传)。markmap 叶节点用来贴角色名后缀。 */
   roles?: string[];
   /** 管理模块 id(从 frontmatter.module_group 透传)。markmap 用来在 module → feature 中间插入分组节点。 */
@@ -576,4 +637,242 @@ export interface ProductVision {
   exists: boolean;
   content: string;
   last_modified: string | null;
+}
+
+/** 决策状态枚举(per docs/decisions-contract.md §2)。 */
+export type DecisionStatus = "active" | "superseded" | "archived";
+
+/** 架构警告状态枚举(per docs/warnings-contract.md)。 */
+export type WarningStatus = "待承接" | "部分承接" | "已纳入";
+
+/**
+ * 产品级架构警告(ARCHITECTURAL-WARNINGS.md 单文件,H2 章节)。
+ * 见 docs/warnings-contract.md。
+ */
+export interface ArchitecturalWarning {
+  /** 形如 "1" / "2" — 警告序号(从 H2 标题提取) */
+  id: string;
+  /** 一句话标题(H2 标题文本) */
+  title: string;
+  /** 当前承接状态;默认 "待承接" */
+  status: WarningStatus;
+  /** **学长原话** 段(允许 quote 块、原始 markdown) */
+  originalQuote: string;
+  /** **学长原意** / **原意** 段 */
+  interpretation: string;
+  /** **整体规格承接** 段 */
+  resolution: string;
+  /** **含义** 段 */
+  implication: string;
+  /** 完整 markdown body(供 UI 展开显示) */
+  body: string;
+}
+
+export interface ArchitecturalWarningsData {
+  exists: boolean;
+  warnings: ArchitecturalWarning[];
+  preamble: string;
+  last_modified: string | null;
+}
+
+/**
+ * L0 违规(CONVENTIONS.md 命名 / 字段 / 通用流程 等机械可验证规则的违例)。
+ */
+export interface L0Violation {
+  /** 违规类别 */
+  category: "naming" | "missing-frontmatter" | "invalid-reference" | "format";
+  /** 违规简短描述 */
+  message: string;
+  /** 涉及的 source 文件相对路径 */
+  source: string;
+  /** 严重度:error(必须修) / warn(建议修) */
+  severity: "error" | "warn";
+  /** 修复建议 */
+  suggestion?: string;
+}
+
+export interface L0ViolationsData {
+  exists: boolean;
+  /** 机械化检查的总违规数 */
+  total: number;
+  violations: L0Violation[];
+  /** 生成时间 */
+  generated_at: string;
+}
+
+/**
+ * 产品级决策(DECISIONS.md 单文件,H3 块格式 — 见 docs/decisions-contract.md)。
+ * 解析器允许 H3 块为主要形态,fallback 到 legacy 表格行(`| D-NN | 决策 | 理由 |`)
+ * 以兼容已有规格快照。
+ */
+export interface Decision {
+  /** 形如 "D-47" — 必须 `D-` 前缀 + 数字 */
+  id: string;
+  /** ISO 日期 YYYY-MM-DD(无则空字符串) */
+  date: string;
+  /** 一行标题 */
+  title: string;
+  /** 默认 active */
+  status: DecisionStatus;
+  /** 决策摘要(一句话) */
+  summary: string;
+  /** 受影响的 feature id 清单(逗号列表解析) */
+  affectedFeatures: string[];
+  /** 来源段引用(如 "SPEC-V1.md §7.3");空字符串表示未填 */
+  sourceRef: string;
+  /** 块完整 markdown(供 UI 展开渲染) */
+  body: string;
+}
+
+/**
+ * Path C 派生实体(`derived/entities/<Name>.md`)。
+ * 见 docs/entity-contract.md。派生只读,UI 不编辑;修改 → 改 source 重派生。
+ */
+export interface DerivedEntity {
+  /** PascalCase 规范名,与文件名(去.md)一致 */
+  name: string;
+  /** 取自 ENTITIES-OWNERSHIP.md;未声明 → "[TBD]" */
+  layer: string;
+  /** 取自 ENTITIES-OWNERSHIP.md;未声明 → "[TBD]" */
+  maintainers: string;
+  /** 派生依据 — feature 路径列表(`modulename/featureid`) */
+  sourceFeatures: string[];
+  /** 派生依据 — 接缝 id 列表 */
+  sourceSeams: string[];
+  /** 派生依据 — 决策 id 列表 */
+  sourceDecisions: string[];
+  /** 生成时间(ISO),取自 frontmatter.generated_at 或文件 mtime */
+  generated_at: string | null;
+  /** 完整 markdown body(供 UI 展开看字段表 / 状态机 / 等) */
+  body: string;
+}
+
+/**
+ * Reconcile 报告(`derived/entities/reconcile-report.md`)。
+ * 见 docs/entity-contract.md §4。
+ */
+export interface EntityReconcileDiff {
+  /** 实体规范名 */
+  name: string;
+  /** 派生侧的描述(可选,声明有派生无 时为空) */
+  derivedNote?: string;
+  /** 声明侧 layer(可选,派生有声明无 时为空) */
+  declaredLayer?: string;
+  /** 派生侧 layer(可选,归属不一致 时填) */
+  derivedLayer?: string;
+  /** 建议处理 */
+  suggestion?: string;
+}
+
+export interface EntityReconcileReport {
+  exists: boolean;
+  /** 文件原文(供 UI markdown 渲染) */
+  rawMarkdown: string;
+  /** 派生有声明无 */
+  derivedOnly: EntityReconcileDiff[];
+  /** 声明有派生无 */
+  declaredOnly: EntityReconcileDiff[];
+  /** 归属不一致 */
+  layerMismatch: EntityReconcileDiff[];
+  last_modified: string | null;
+}
+
+/**
+ * 派生实体 question(`derived/entities/questions.md`),trigger 模式与 flowchart-contract §6.3 一致。
+ */
+export interface EntityQuestion {
+  feature: string;
+  module: string;
+  question: string;
+  trigger: {
+    feature_path: string;
+    original_text: string;
+  };
+  proposed_resolution?: string;
+}
+
+/**
+ * GET /api/products/:id/entities/derived 响应。
+ */
+export interface DerivedEntitiesData {
+  /** 是否存在 derived/entities/ 目录且非空 */
+  exists: boolean;
+  entities: DerivedEntity[];
+  /** 派生整体生成时间(取目录下最新文件 mtime) */
+  generated_at: string | null;
+  /** stale:source 文件 mtime > 派生文件 mtime → true */
+  stale: boolean;
+  stale_reason: string | null;
+}
+
+/**
+ * GET /api/products/:id/entities/questions 响应。
+ */
+export interface DerivedEntityQuestionsData {
+  exists: boolean;
+  questions: EntityQuestion[];
+  questions_lint_ok: boolean;
+  questions_lint_errors: string[];
+}
+
+/**
+ * 实体归属表单行(ENTITIES-OWNERSHIP.md `## 完整归属清单` 表格)。
+ * 分两种:`group` 是分组分隔行(D 字典层 / A 产品层 / ...),`entity` 是数据行。
+ */
+export type OwnershipRow = OwnershipGroupRow | OwnershipEntityRow;
+
+export interface OwnershipGroupRow {
+  kind: "group";
+  /** 分组名(去除粗体标记后),如 "D 字典层" */
+  name: string;
+}
+
+export interface OwnershipEntityRow {
+  kind: "entity";
+  /** 实体规范名(PascalCase),如 "Product" / "Order"。从 `EntityName(中文别名)` 提取首段 */
+  name: string;
+  /** 中文别名(去括号),如 "学员" — 无别名时为空 */
+  alias: string;
+  /** 归属层 — 自由文本,常用值:机构层 / 校区(硬隔离) / 校区(软隔离) / 跟随 <Entity> / 跨校区 / 本校区 / 可配置 */
+  layer: string;
+  /** 维护权限文本 */
+  maintainers: string;
+  /** 备注 — 可引用决策(D-NN) */
+  note: string;
+}
+
+/**
+ * GET /api/products/:id/entities-ownership 的响应数据。
+ */
+export interface EntitiesOwnershipData {
+  exists: boolean;
+  /** 解析的所有行(含分组分隔行 + 数据行,保留原始顺序) */
+  rows: OwnershipRow[];
+  /** `## 完整归属清单` H2 之前的内容(leading comment + H1 + preamble) */
+  preamble: string;
+  /** `## 完整归属清单` 表格之后的内容(`## 关键派生关系` / `## 跨校区操作的处理原则` 等) */
+  trailing: string;
+  last_modified: string | null;
+}
+
+/**
+ * 产品级跨模块接缝契约(SEAMS.md 单文件,H2 章节;见 docs/seams-contract.md)。
+ * 阶段 3 保留 SEAMS.md 单文件形态(yunkai-erp 快照即此形态);后续阶段视情况切分到 seams/<id>.md。
+ */
+export interface Seam {
+  /** 接缝编号,形如 "5.3" / "A→B" 等任意字符串 */
+  id: string;
+  /** 接缝标题(由 H2 行解析) */
+  title: string;
+  /** 调用方 / 被调用方(可选,从 body 提取) */
+  caller: string;
+  callee: string;
+  /** 触发时机(可选) */
+  trigger: string;
+  /** 数据契约段(原文,可能含 typescript-like 代码块) */
+  dataContract: string;
+  /** 异常处理段(原文) */
+  exceptions: string;
+  /** 接缝完整 markdown body(供 UI 展开渲染) */
+  body: string;
 }

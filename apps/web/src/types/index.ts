@@ -50,9 +50,35 @@ export type {
   // 流程图 derived 数据 (data/products/<id>/derived/flowcharts/)
   FlowchartData,
   FlowchartQuestion,
+  ModuleFlowchartData,
+  ModuleFlowchartListData,
   // 产品规格层(Layer 2)文件
   SpecFile,
   SpecFileKind,
   // 产品愿景层(Layer 1)文件
-  ProductVision
+  ProductVision,
+  // 决策日志(DECISIONS.md)
+  Decision,
+  DecisionStatus,
+  // 跨模块接缝契约(SEAMS.md)
+  Seam,
+  // 实体归属表(ENTITIES-OWNERSHIP.md)
+  OwnershipRow,
+  OwnershipGroupRow,
+  OwnershipEntityRow,
+  EntitiesOwnershipData,
+  // Path C 派生实体
+  DerivedEntity,
+  DerivedEntitiesData,
+  DerivedEntityQuestionsData,
+  EntityQuestion,
+  EntityReconcileDiff,
+  EntityReconcileReport,
+  // 架构警告
+  ArchitecturalWarning,
+  ArchitecturalWarningsData,
+  WarningStatus,
+  // L0 违规
+  L0Violation,
+  L0ViolationsData
 } from "@atlas/shared";

@@ -18,7 +18,8 @@ export type GenerateScope =
   | "entity"
   | "conventions"
   | "prototype"
-  | "flowchart";
+  | "flowchart"
+  | "entity-derive";
 
 export interface GenerateResult {
   prompt: string;
@@ -195,7 +196,20 @@ ownership: org                               # org / campus / follows:<Entity> /
 \`\`\`markdown
 # <name>
 
-## 描述                                   ← 必填,**轻形态**(三个粗体小标题)
+## 给决策者                               ← 必填,**决策者视角**(白话 3-5 行)
+
+<面向业务决策方,回答 4 件事:>
+- **解决谁的痛**:<一句话>
+- **不做的后果**:<一句话>
+- **关键取舍**:<一句话,如"X 换 Y">
+- **需要拍的事**:<决策者需要拍板的具体问题(可多条);若无写"无">
+
+写作要求:
+- 不出现实体名 / 字段名 / v1 §X.X / D-XX 锚点
+- 不超过 5 条 bullet,每条 ≤ 30 字
+- 写不出来宁可空着也别灌水
+
+## 描述                                   ← 必填,**轻形态**(三个粗体小标题,Agent/工程师视角)
 
 <自由叙述,但建议含>
 
@@ -380,12 +394,13 @@ export async function buildConventionsGeneratePrompt(productId: string): Promise
 }
 
 /**
- * 流程图生成 prompt:
- *   - 输入:产品的全部 modules + features(含 roles)+ data/roles.yml + docs/flowchart-contract.md(全文 inline)
- *   - 输出:Agent 写两份文件到 data/products/<id>/derived/flowcharts/:
- *     - main.mmd        (Mermaid swimlane flowchart,节点身份图,下游派生消费)
- *     - main.questions.md(诊断单,给人看,见 contract §6.3)
- *   - prompt 自闭包:把 contract 全文 inline,Agent 不需要去额外读 docs/
+ * 流程图生成 prompt(**决策者视角 · per-module 切分版**):
+ *   - 输入:产品的全部 modules + features(含 roles + 触发后续)+ docs/decision-maker-flowchart-contract.md(全文 inline)
+ *   - 输出:Agent 写 N+1 份文件到 data/products/<id>/derived/flowcharts/by-module/:
+ *     - <moduleId>.mmd  (每个有 features 的 module 一张图)
+ *     - questions.md    (per-module 诊断单聚合在这一份)
+ *   - 老 main.mmd / main.questions.md(工程师视角 · entity 派生 Agent 用)**不再由本 prompt 维护**
+ *   - prompt 自闭包:把新 contract 全文 inline,Agent 不需要额外读 docs/
  */
 export async function buildFlowchartGeneratePrompt(
   productId: string
@@ -395,100 +410,141 @@ export async function buildFlowchartGeneratePrompt(
   const modules = await loadModules(productId);
   const registry = await loadRolesRegistry();
 
-  // 收集所有 feature 的完整快照(roles + description + 路径),作为 prompt 上下文
-  const featureBlocks: string[] = [];
+  // 按 module 分组的 feature 快照(对齐 per-module 输出文件结构)
+  // 每个 module 单独成块,含其 module_group 列表 + 该 module 下所有 features 的 name/group/触发后续
+  const moduleBlocks: string[] = [];
+  let totalFeatures = 0;
   for (const mod of modules) {
     const features = await loadFeatures(productId, mod.name);
-    for (const f of features) {
-      const featurePath = `data/products/${productId}/modules/${mod.name}/features/${f.id}.md`;
-      const rolesLine =
-        f.roles && f.roles.length > 0
-          ? f.roles
-              .map((id) => {
-                const role = registry.roles.find((r) => r.id === id);
-                return role ? `${role.name}(id: ${id})` : `${id} ⚠未在 RolesRegistry`;
-              })
-              .join(", ")
-          : "(未指定)";
-      const desc = f.description.trim() || "(无描述)";
-      featureBlocks.push(
-        `### [${mod.name}/${f.id}] ${f.name}
-- **feature_path**: ${featurePath}
-- **roles**: ${rolesLine}
-- **description**:
-${indent(desc, "  ")}`
-      );
-    }
+    if (features.length === 0) continue; // 没 features 的模块不生成 .mmd
+    totalFeatures += features.length;
+
+    const groupLines = (mod.groups ?? [])
+      .map((g) => `  - ${g.id} → "${g.name}"`)
+      .join("\n");
+
+    const featLines = features
+      .map((f) => {
+        // 从 description 里抽"触发后续"那一行(精确字符串,Agent 据此画 arrows)
+        const triggerLineMatch = f.description.match(/\*\*触发后续\*\*\s*[::]\s*([^\n]+)/);
+        const trigger = triggerLineMatch ? triggerLineMatch[1].trim() : "(无)";
+        const groupId = f.module_group || "(未分组)";
+        return `  - **${f.id}** · ${groupId} · "${f.name}"\n    触发后续: ${trigger}`;
+      })
+      .join("\n");
+
+    moduleBlocks.push(
+      `### Module: ${mod.name} · ${mod.title || mod.name}
+- 输出文件: \`${`data/products/${productId}/derived/flowcharts/by-module/${mod.name}.mmd`}\`
+- 模块 module_group 清单(subgraph 来源):
+${groupLines || "  (无 module_group 声明)"}
+- 该模块下 features(${features.length}):
+${featLines}`
+    );
   }
 
   const rolesList = registry.roles
     .map((r) => `- ${r.name} (id: ${r.id})${r.note ? ` — ${r.note}` : ""}`)
     .join("\n");
 
-  // 读 contract 全文 inline(每次重读,文件不大,避免缓存与 contract 编辑脱节)
-  const contractText = await readContractText();
+  const contractText = await readDecisionMakerFlowchartContractText();
 
   const outputDir = `data/products/${productId}/derived/flowcharts/`;
+  const byModuleDir = `${outputDir}by-module/`;
   const today = new Date().toISOString().slice(0, 10);
 
   const parts = [
-    header(meta, productId, "流程图"),
+    header(meta, productId, "决策者流程图"),
     `## 你的任务
-你是 Atlas 的流程图生成 Agent。基于产品的全部 **功能点 + roles** 和下面 inline 的
-**flowchart contract**,产出两份 derived 文件:
+你是 Atlas 的**决策者流程图**生成 Agent。基于产品的全部 **功能点 + module_group + 触发后续字段** 和下面
+inline 的 **decision-maker-flowchart-contract**,产出 per-module 流程图:
 
-1. \`${outputDir}main.mmd\` — Mermaid swimlane flowchart(每个角色一个 subgraph)
-2. \`${outputDir}main.questions.md\` — 诊断单(见 contract §6.3)
+1. **每个有 features 的 module 一份 \`.mmd\`** 文件,放在 \`${byModuleDir}<moduleId>.mmd\`
+2. **聚合 questions** 一份 \`${byModuleDir}questions.md\`(如果有拿不准的)
+
+**这套图是给业务决策方看的**,不是给工程师 / Agent 看的。所以:
+- 节点 = feature(显示 \`feature.name\`),不是 entity.action.scope
+- subgraph = module_group(用中文显示名),不是 role swimlane
+- arrows 数据源 = feature md 的 \`触发后续\` 字段(精确字符串里的 feature id 引用)
+- 跨模块引用 = 用 \`X_xxx\` 虚框节点表示(详见 contract §3.2)
 
 工作流要求:
 1. 先输出**生成计划**:
-   - 你打算建多少个节点?哪些是合并/拆分边界 case?
-   - 你打算抛多少 question?对应哪些 feature?
-   - 选择 §4.2 的方案 A 还是 B 来放置跨多角色节点
+   - 你打算给哪些 module 生成 .mmd?哪些跳过(features=0)?
+   - 每个 module 大约几个节点 + 几条 arrows?
+   - 跨模块引用的 feature 有哪些?
 2. **等用户确认后**再用 Edit/Write 工具实际写文件
-3. 严格遵守 contract。**节点身份零自由度,流程拓扑有限自由度**
-4. 不要写 \`${outputDir}\` 以外的任何文件;不要回写 features/*.md
-5. main.mmd 文件头必须有(见 contract §4.3):
+3. 严格遵守 contract:**节点身份从 feature md 来,Agent 不增不删**
+4. 不要写 \`${byModuleDir}\` 以外的任何文件;不要回写 features/*.md / MODULE.md
+5. **不再生成 main.mmd / main.questions.md**(那是老工程师视角 contract 的产物,与本 prompt 无关)
+6. 每个 .mmd 文件头必须有:
    \`\`\`
-   %% Generated from data/products/${productId}/modules/  · DO NOT EDIT HERE
-   %% Source of truth lives in feature points (功能点 tab).
-   %% Generated at: <ISO timestamp>
+   %% Module: <moduleId> · <module 中文显示名>
+   %% 视角: 决策者 — 展示该模块下功能点的业务触发关系
+   %% 来源: data/products/${productId}/modules/<moduleId>/(features/ 的 触发后续 字段)
+   %% 生成时间: <ISO timestamp>
    \`\`\`
-6. main.questions.md 是 YAML 列表;每条带 \`trigger.feature_path\` + \`trigger.original_text\`,
-   且 \`original_text\` 必须是对应 feature.md 中**已存在的字面子串**(见 contract §6.3.4 的 grep lint)
+   ⚠ **不要写单独一行的 \`%%\`(只有两个百分号没内容)** —— mermaid 10.x 解析器会炸,报错
+   \`Parse error on line 1: %%flowchart LR  su\`。注释段之间要分隔就用空行或 \`%% ---\` / \`%% Notes:\`
+   等带内容的形式。
+7. questions.md 是 YAML 列表;每条带 \`module\`(哪个模块)、\`trigger.feature_path\` + \`trigger.original_text\`
+
+## ⚠ 抛 question 前必读
+
+**用户视角:用户做业务规则决定,不做 schema/工程决定**。
+
+抛 question 前必过 5 级自检:
+1. feature.md description / 字段清单 / 触发后续 中有答案? → 有,自决
+2. DECISIONS.md / SEAMS.md / ENTITIES-OWNERSHIP.md 中有答案? → 有,自决
+3. 能用 grep / ls / 模式匹配判断? → 能,自己查,自决
+4. 业务问题(用户能拍板) 还是 工程问题(用户答不了)?
+   - 工程问题(用什么数据结构 / 命名 / 布局方向 LR vs TD) → 自决,可在 mmd 头部 \`%% Note: ...\` 留 trail
+   - 业务问题(谁、什么时候、按什么业务规则) → 去第 5 级
+5. 你能写出 proposed_resolution? → 能写出 = 已自决 = **直接执行,不抛**
+
+**判别金句**:不写代码光开会能说清楚的是业务问题(可抛),必须看 schema 才能定的是工程问题(自决)。
+
+**反例 — 这些都属于"已自决但翻译成了 question",不许抛**:
+- ❌ "用 LR 还是 TD 布局?"(自决,优先 TD,>10 节点改 LR)
+- ❌ "feature X 该挂在哪个 group 下?"(看 feature.module_group 字段)
+- ❌ "跨模块虚框该不该画?"(看"触发后续"是否引用别模块的 feature)
+
+**正例 — 真业务问题**:
+- ✅ "feature A 的"触发后续"写了 feature_B,但 feature_B 在 features/ 目录下找不到。是写错了还是漏建了?"
+- ✅ "feature A 和 B 都列了"触发 C",但 C 在两个模块都不存在,我画不出 arrow,要不要建 C?"
 `,
     "",
     "## 当前已知信息",
     describeProduct(meta, productId),
     "",
-    `### 全局角色注册表 (data/roles.yml)
+    `### 全局角色注册表 (data/roles.yml · 仅供参考,本 prompt 不用作 swimlane)
 ${rolesList}`,
     "",
-    `### 全部功能点(${featureBlocks.length} 个)`,
-    featureBlocks.length === 0
-      ? "(无 — 该产品尚未建模块/功能点树,无法生成流程图。请先跑 generate-feature。)"
-      : featureBlocks.join("\n\n"),
+    `### 全部模块 + 功能点(共 ${moduleBlocks.length} 个模块 / ${totalFeatures} 个 features)`,
+    moduleBlocks.length === 0
+      ? "(无 features — 该产品尚未建模块/功能点树,无法生成流程图。请先跑 generate-feature。)"
+      : moduleBlocks.join("\n\n"),
     "",
     "---",
     "",
-    "## 必读 · flowchart contract 全文 (inline,等同 docs/flowchart-contract.md)",
+    "## 必读 · decision-maker-flowchart-contract 全文 (inline)",
     "",
     contractText,
     "",
     "---",
     "",
     `## 输出约定速查
-- 主图: ${outputDir}main.mmd
-- 诊断单: ${outputDir}main.questions.md
-- 当前时间(用作文件头): ${today}T00:00:00Z(可改为生成时刻的真实 ISO)
-- 节点命名格式: \`[Entity].[action].[scope] <<roles: 中文角色名, ...>>\` (§2.1)
-- roles 列表用中文 name(不是 id),逗号 + 空格分隔(§2.2)
-- 多角色合并节点用 §4.2 方案 A 或 B,在生成计划里说明你选哪个
+- 文件位置: ${byModuleDir}<moduleId>.mmd (每模块一份) + ${byModuleDir}questions.md (聚合)
+- 节点格式: \`F_<feature_id>["<feature.name>"]\` (同模块) / \`X_<feature_id>(["⇨ <feature.name><br/><small>来自 <module 显示名></small>"])\` (跨模块)
+- subgraph: \`subgraph G_<group_id>["<group 中文显示名>"]\`
+- arrows: 同模块 \`-->\` / 跨模块 \`-.->\`
+- arrows 数据源: feature md 的 **触发后续** 字段(每条只能引用已存在的 feature id)
+- 当前时间(用作文件头): ${today}T00:00:00Z
 `,
     "",
     FOOTER(
       productId,
-      "- 流程图与诊断单是 derived,不允许修改 source(features/*.md / MODULE.md / STATUS.md)\n- 任何不确定走 contract §6.3.3 的 questions.md,不要凭'业务常识'补节点"
+      "- 流程图是给决策者看的,不是给 Agent 看的(Agent 派生实体走老 main.mmd 链路,不在本 prompt 范围)\n- 任何不确定走 questions.md,不要凭'业务常识'编 feature 关系\n- 不要写 main.mmd / main.questions.md(那是另一个 prompt 的事)"
     )
   ];
 
@@ -511,11 +567,247 @@ async function readContractText(): Promise<string> {
   }
 }
 
+let dmContractCache: { mtime: number; text: string } | null = null;
+
+async function readDecisionMakerFlowchartContractText(): Promise<string> {
+  const contractPath = path.resolve(
+    DATA_ROOT,
+    "..",
+    "docs",
+    "decision-maker-flowchart-contract.md"
+  );
+  try {
+    const stat = await fs.stat(contractPath);
+    const mtime = stat.mtimeMs;
+    if (dmContractCache && dmContractCache.mtime === mtime) return dmContractCache.text;
+    const text = await fs.readFile(contractPath, "utf8");
+    dmContractCache = { mtime, text };
+    return text;
+  } catch {
+    return "(警告:docs/decision-maker-flowchart-contract.md 缺失,Agent 必须先要求用户提供该文件)";
+  }
+}
+
 function indent(text: string, prefix: string): string {
   return text
     .split("\n")
     .map((line) => prefix + line)
     .join("\n");
+}
+
+/**
+ * Path C 实体派生提示词。
+ * 见 docs/entity-contract.md。
+ *
+ * 输入信号(全部 source layer):
+ *   - features × N(modules/<m>/features/<f>.md 的 frontmatter + 字段清单 + 状态转移 + 字段权限)
+ *   - SEAMS.md(跨模块字段映射)
+ *   - DECISIONS.md(决策号引用)
+ *   - ENTITIES-OWNERSHIP.md(ground truth 归属表)
+ *
+ * 输出(写入 data/products/<id>/derived/entities/):
+ *   - 每实体一个 <Name>.md
+ *   - questions.md(诊断单,trigger 模式与 flowchart-contract §6.3 一致)
+ *   - reconcile-report.md(派生 vs 声明的差异)
+ */
+export async function buildEntityDerivePrompt(productId: string): Promise<GenerateResult> {
+  const meta = await loadMeta(productId);
+  const stats = await collectStats(productId);
+  const modules = await loadModules(productId);
+  const registry = await loadRolesRegistry();
+
+  // 收集 features(含 entities_touched / ownership / 字段清单 / 状态转移)
+  const featureBlocks: string[] = [];
+  for (const mod of modules) {
+    const features = await loadFeatures(productId, mod.name);
+    for (const f of features) {
+      const featurePath = `data/products/${productId}/modules/${mod.name}/features/${f.id}.md`;
+      const desc = f.description.trim() || "(无描述)";
+      const rolesLine = f.roles && f.roles.length > 0
+        ? f.roles
+            .map((id) => {
+              const role = registry.roles.find((r) => r.id === id);
+              return role ? `${role.name}(id: ${id})` : `${id} ⚠未在 RolesRegistry`;
+            })
+            .join(", ")
+        : "(未指定)";
+      const fieldsLine = f.fields && f.fields.length > 0
+        ? f.fields.map((row) => `  | ${row.name} | ${row.type} | ${row.required ? "✓" : "-"} | ${row.constraint} | ${row.note} |`).join("\n")
+        : "  (无 ## 字段清单 段)";
+      const statesLine = f.state_transitions && f.state_transitions.length > 0
+        ? f.state_transitions.map((row) => `  | ${row.from} | ${row.to} | ${row.trigger} | ${row.role} |`).join("\n")
+        : "  (无 ## 状态转移 段)";
+      featureBlocks.push(
+        `### [${mod.name}/${f.id}] ${f.name}
+- **feature_path**: ${featurePath}
+- **roles**: ${rolesLine}
+- **entities_touched**: ${(f.entities_touched ?? []).join(", ") || "(未指定)"}
+- **ownership**: ${f.ownership ?? "(未指定)"}
+- **description**:
+${indent(desc, "  ")}
+- **字段清单**:
+${fieldsLine}
+- **状态转移**:
+${statesLine}`
+      );
+    }
+  }
+
+  const seamsText = (await readTextFile("products", productId, "SEAMS.md")) ?? "(无 SEAMS.md)";
+  const decisionsText = (await readTextFile("products", productId, "DECISIONS.md")) ?? "(无 DECISIONS.md)";
+  const ownershipText = (await readTextFile("products", productId, "ENTITIES-OWNERSHIP.md")) ?? "(无 ENTITIES-OWNERSHIP.md)";
+  // 流程图 main.mmd 含已经规范化的 Entity 名,实体派生 Agent 必须与其严格一致。
+  // 文件不存在 → 没有流程图作锚点,派生 Agent 自己挑名字,但要在派生计划中说明。
+  const flowchartMmdText = (await readTextFile("products", productId, "derived", "flowcharts", "main.mmd")) ?? "(无 main.mmd — 该产品流程图尚未生成,实体命名请按 flowchart-contract §3.4 / §3.4.2 自行规范并在派生计划中说明映射表)";
+
+  const rolesList = registry.roles
+    .map((r) => `- ${r.name} (id: ${r.id})${r.note ? ` — ${r.note}` : ""}`)
+    .join("\n");
+
+  const contractText = await readEntityContractText();
+  const flowchartContractText = await readFlowchartContractText();
+
+  const outputDir = `data/products/${productId}/derived/entities/`;
+  const today = new Date().toISOString();
+
+  const parts = [
+    header(meta, productId, "Path C 实体派生"),
+    `## 你的任务
+你是 Atlas 的 Path C **实体派生 Agent**。基于产品的 4 类 source 输入(features × N / SEAMS / DECISIONS /
+ENTITIES-OWNERSHIP),产出 derived 实体清单 + reconcile 报告 + questions。
+
+输出文件(全部写到 \`${outputDir}\`):
+1. \`<EntityName>.md\` — 每实体一个文件(见下方契约 §3)
+2. \`questions.md\` — 诊断单(对偶 flowchart §6.3,trigger lint 同模式)
+3. \`reconcile-report.md\` — 派生 vs 声明的差异(见契约 §4)
+
+工作流要求:
+1. 先输出**派生计划**:
+   - 列你打算派生的所有实体 + 它们的命名映射表(见 flowchart-contract §3.4 / §3.4.1 / §3.4.2)
+   - 列你打算抛多少 question?对应哪些 source?
+   - 列预期 reconcile 差异:派生有声明无 N1 / 声明有派生无 N2 / 归属不一致 N3
+2. **等用户确认后**再用 Edit/Write 工具实际写文件
+3. 严格遵守契约。**派生只读 — 不要回写 features/SEAMS/DECISIONS/ENTITIES-OWNERSHIP**
+4. 缺数据 → 标 \`[TBD]\` + 写 questions.md ticket;**不要"业务常识"补**
+5. 命名规范以 flowchart-contract §3.4 / §3.4.1 / §3.4.2 为准 — 优先与 derived/flowcharts/main.mmd 中的 Entity 名一致(若该文件存在)
+6. 每个 entity md 必须含 frontmatter \`name / layer / maintainers / sourceFeatures[] / generated_at\`(其余字段可选)
+7. 当前生成时间(写入 generated_at): ${today}
+
+## ⚠ 抛 question 前必读(同 flowchart-contract §6.3.5)
+
+**用户做业务规则决定,不做 schema/工程决定**。
+
+抛 question 前必过 5 级自检:
+1. feature.md / SEAMS / DECISIONS / ENTITIES-OWNERSHIP 中有答案? → 有,自决
+2. derived/flowcharts/main.mmd 中有答案? → 有,自决(优先以流程图为命名锚点)
+3. 能用 grep / ls / 模式匹配判断? → 能,自己查,自决
+4. 业务问题 vs 工程问题?
+   - 工程(字段 vs 表 / 类型 / 命名 / 关系建模) → 自决,可在 entity md 加 \`<!-- Agent note: ... -->\` 留 trail
+   - 业务(谁有权 / 何时触发 / 业务约束) → 去第 5 级
+5. 能写出 proposed_resolution? → 能写出 = 已自决 = **直接执行,不抛**
+
+**判别金句**:不写代码光开会能说清楚的是业务问题,必须看 schema 才能定的是工程问题。
+
+**反例**(本轮派生 Agent 不许抛):
+- ❌ "X 字段是 string 还是 enum?"(看 feature 字段清单 / 自决)
+- ❌ "X 是 FK 还是嵌入?"(关系建模 / 自决)
+- ❌ "状态机要不要加 X 状态?"(看 feature 状态转移段 / 自决)
+- ❌ "X 是否应该有索引?"(纯工程)
+
+**正例**:
+- ✅ "推荐人改名后,推荐关系字段保持 id 还是写历史 name?"(业务规则)
+- ✅ "SEAMS §5.6 三边契约里财务先动还是教务先动?"(业务流程)
+- ✅ "Entitlement 撤销时,关联的 AttendanceRecord 是删还是留作历史?"(业务约束)
+`,
+    "",
+    "## 当前已知信息",
+    describeProduct(meta, productId),
+    "",
+    `### 全局角色注册表 (data/roles.yml)
+${rolesList}`,
+    "",
+    `### 全部功能点(${featureBlocks.length} 个)`,
+    featureBlocks.length === 0
+      ? "(无 — 该产品尚未建模块/功能点树,无法派生实体。请先跑 generate-feature。)"
+      : featureBlocks.join("\n\n"),
+    "",
+    "### SEAMS.md(跨模块接缝契约)",
+    seamsText,
+    "",
+    "### DECISIONS.md(决策日志)",
+    decisionsText,
+    "",
+    "### ENTITIES-OWNERSHIP.md(实体归属 ground truth)",
+    ownershipText,
+    "",
+    "### derived/flowcharts/main.mmd(已生成的流程图 — 实体命名锚点)",
+    "派生实体的 name 必须与本文件中出现的 Entity 名严格一致(同 entity 不可起新名,不同 entity 不可合并)。",
+    "```mermaid",
+    flowchartMmdText,
+    "```",
+    "",
+    "---",
+    "",
+    "## 必读 · entity-contract 全文 (inline)",
+    "",
+    contractText,
+    "",
+    "---",
+    "",
+    "## 必读 · flowchart-contract §3.4 / §3.4.1 / §3.4.2(实体命名规范)",
+    "",
+    flowchartContractText,
+    "",
+    "---",
+    "",
+    `## 输出约定速查
+- 派生目录: ${outputDir}
+- 每实体一文件: <EntityName>.md(PascalCase 文件名,与 frontmatter.name 一致)
+- 诊断单: ${outputDir}questions.md(YAML 数组)
+- reconcile 报告: ${outputDir}reconcile-report.md(三段 H2 + 表格)
+- 当前时间(用作 frontmatter.generated_at): ${today}
+`,
+    "",
+    FOOTER(
+      productId,
+      "- 派生只读,**不要回写** features/SEAMS/DECISIONS/ENTITIES-OWNERSHIP\n- 缺数据宁可标 [TBD] + 走 questions.md,不要凭'业务常识'补\n- 命名规范优先匹配 derived/flowcharts/main.mmd 中已有的 Entity 名"
+    )
+  ];
+
+  return { prompt: parts.join("\n"), stats };
+}
+
+let entityContractCache: { mtime: number; text: string } | null = null;
+async function readEntityContractText(): Promise<string> {
+  const contractPath = path.resolve(DATA_ROOT, "..", "docs", "entity-contract.md");
+  try {
+    const stat = await fs.stat(contractPath);
+    const mtime = stat.mtimeMs;
+    if (entityContractCache && entityContractCache.mtime === mtime) return entityContractCache.text;
+    const text = await fs.readFile(contractPath, "utf8");
+    entityContractCache = { mtime, text };
+    return text;
+  } catch {
+    return "(警告:docs/entity-contract.md 缺失,Agent 必须先要求用户提供该文件)";
+  }
+}
+
+let flowchartContractCache: { mtime: number; text: string } | null = null;
+async function readFlowchartContractText(): Promise<string> {
+  const contractPath = path.resolve(DATA_ROOT, "..", "docs", "flowchart-contract.md");
+  try {
+    const stat = await fs.stat(contractPath);
+    const mtime = stat.mtimeMs;
+    if (flowchartContractCache && flowchartContractCache.mtime === mtime) return flowchartContractCache.text;
+    const text = await fs.readFile(contractPath, "utf8");
+    // 仅提取 §3.4 / §3.4.1 / §3.4.2(精简体积)
+    const m = text.match(/### 3\.4 实体命名一致性[\s\S]*?(?=^##\s+|$(?![\s\S]))/m);
+    const slice = m ? m[0] : text;
+    flowchartContractCache = { mtime, text: slice };
+    return slice;
+  } catch {
+    return "(警告:docs/flowchart-contract.md 缺失)";
+  }
 }
 
 export async function buildPrototypeGeneratePrompt(productId: string): Promise<GenerateResult> {

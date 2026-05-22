@@ -29,6 +29,13 @@ interface FeatureFrontmatter {
   entities_touched?: unknown;
   /** 中形态:归属层(org / campus / follows:Entity / shared)。非字符串当空。 */
   ownership?: unknown;
+  /**
+   * 决策者审阅戳:YYYY-MM-DD。存在 = 已审;不存在 = 待审。
+   * 由 PATCH /:fid/review 写,Atlas web 上"标已审"按钮触发。
+   */
+  reviewed_at?: unknown;
+  /** 可选审计追溯:谁标的已审。 */
+  reviewed_by?: unknown;
 }
 
 const VALID_ADDED_PHASES = new Set(["planning", "in-progress", "live"]);
@@ -66,6 +73,7 @@ export function parseFeatureMarkdown(idFromFile: string, source: string): Featur
   const added_at = fm.added_at?.trim() || undefined;
 
   const description = extractSection(body, "## 描述");
+  const decision_maker_view = extractSection(body, "## 给决策者");
   const cluePoolSection = extractSection(body, "## 线索池");
   const pendingRaw = extractSection(cluePoolSection, "### Pending");
   const resolvedRaw = extractSection(cluePoolSection, "### Resolved");
@@ -83,6 +91,12 @@ export function parseFeatureMarkdown(idFromFile: string, source: string): Featur
   const ownership = typeof fm.ownership === "string" && fm.ownership.trim().length > 0
     ? fm.ownership.trim()
     : undefined;
+  const reviewed_at = typeof fm.reviewed_at === "string" && /^\d{4}-\d{2}-\d{2}$/.test(fm.reviewed_at.trim())
+    ? fm.reviewed_at.trim()
+    : undefined;
+  const reviewed_by = typeof fm.reviewed_by === "string" && fm.reviewed_by.trim().length > 0
+    ? fm.reviewed_by.trim()
+    : undefined;
 
   // 重形态三段 - 全部容错,缺段 / 表格坏 → undefined
   const fieldsSection = extractSection(body, "## 字段清单");
@@ -99,6 +113,9 @@ export function parseFeatureMarkdown(idFromFile: string, source: string): Featur
     created_at,
     last_refined_at,
     description,
+    decision_maker_view,
+    ...(reviewed_at ? { reviewed_at } : {}),
+    ...(reviewed_by ? { reviewed_by } : {}),
     clues: {
       pending: parseClueLines(pendingRaw),
       resolved: parseClueLines(resolvedRaw)

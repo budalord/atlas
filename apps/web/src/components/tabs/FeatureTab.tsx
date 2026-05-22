@@ -2,11 +2,21 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Markmap } from "markmap-view";
 import type { IPureNode } from "markmap-common";
 import { useDataChange } from "../../lib/useDataChange";
-import type { ApiEnvelope, ModuleWithFeatures, RolesRegistry } from "../../types";
+import type { ApiEnvelope, FeaturePointPreview, ModuleWithFeatures, RolesRegistry } from "../../types";
+import { FeatureHoverCard } from "../FeatureHoverCard";
 import { FeatureModal } from "../FeatureModal";
 import { FlowchartView } from "../FlowchartView";
 import { GlobalFeedbackPanel } from "../GlobalFeedbackPanel";
 import { PromptModalDialog, type PromptMode } from "../PromptModalDialog";
+
+/** 7 天内创建且未审阅 → 🆕 徽章 */
+const NEW_BADGE_DAYS = 7;
+function isRecentlyCreated(createdAt: string): boolean {
+  if (!createdAt) return false;
+  const created = Date.parse(createdAt);
+  if (Number.isNaN(created)) return false;
+  return Date.now() - created < NEW_BADGE_DAYS * 86400 * 1000;
+}
 
 interface FeatureTabProps {
   productId: string;
@@ -18,6 +28,12 @@ interface FeatureTabProps {
 interface FeatureRef {
   moduleId: string;
   featureId: string;
+}
+
+interface HoveredFeature {
+  ref: FeatureRef;
+  preview: FeaturePointPreview;
+  anchor: { x: number; y: number };
 }
 
 /**
@@ -39,6 +55,14 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
   const [openFeature, setOpenFeature] = useState<FeatureRef | null>(null);
   const [rolesRegistry, setRolesRegistry] = useState<RolesRegistry | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("markmap");
+  const [hovered, setHovered] = useState<HoveredFeature | null>(null);
+  // hover 关闭定时器:鼠标离开节点 → 启动 → 移入卡片可取消
+  const hoverCloseTimerRef = useRef<number | null>(null);
+  // 让事件处理器始终拿到最新 data(避免闭包过期)
+  const dataRef = useRef<ModuleWithFeatures[] | null>(null);
+  useEffect(() => {
+    dataRef.current = data;
+  }, [data]);
 
   const [promptOpen, setPromptOpen] = useState<PromptMode | null>(null);
 
@@ -109,7 +133,9 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
     return buildTree(productName || productId, data, roleIdToName);
   }, [data, productId, productName, roleIdToName]);
 
-  // 初始化 / 更新 Markmap 实例
+  // 初始化 / 更新 Markmap 实例。
+  // SVG 容器始终挂载(切流程图视图用 CSS display:none),所以 Markmap 实例 + d3 状态
+  // 跨视图切换保留,本 effect 仅在 tree 变时增量 setData。
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
@@ -121,7 +147,7 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
       }
       return;
     }
-    // SVG 元素换了(产品切换 / 走过 fallback 再回来)→ 必须 destroy 旧实例再 create
+    // SVG 元素换了(产品切换 / 走过 fallback 再回来 / 流程图视图切回)→ destroy 旧实例再 create
     if (mmRef.current && mmSvgRef.current !== svg) {
       mmRef.current.destroy();
       mmRef.current = null;
@@ -133,12 +159,7 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
         {
           autoFit: true,
           duration: 300,
-          // markmap-view 把根节点视为 depth=1 而不是 0;`initialExpandLevel: N` 折叠 depth>=N。
-          // 设 2 → 显示 root + modules,features 收起(用户点 module 圆点可展开)
           initialExpandLevel: 2,
-          // 关键修复:禁用拖拽平移,防止把整张图拖出视口("上下滑动让结构脱离视图")。
-          // 缩放、折叠/展开节点、点叶节点弹弹窗这些交互都不受影响。
-          // 用户需要重新居中可点左下「📍 回到中心」按钮。
           pan: false,
           paddingX: 8,
           spacingHorizontal: 80,
@@ -165,31 +186,85 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
     };
   }, []);
 
-  // SVG 容器的 click 事件代理:冒泡到 g.markmap-node 后,从 datum.payload.featureRef 反查
+  // SVG 容器的 click + hover 事件代理:
+  //   click → 打开 FeatureModal(看技术全貌)
+  //   mouseenter on g.markmap-node → 显示 FeatureHoverCard(决策者视角 + 快速操作)
+  //   mouseleave on g.markmap-node → 启动延时关闭(300ms),移入卡片可取消
   useEffect(() => {
     const svg = svgRef.current;
     if (!svg) return;
-    const onClick = (e: MouseEvent) => {
-      let el = e.target as Element | null;
+
+    const findFeatureRefAt = (target: Element | null): FeatureRef | null => {
+      let el = target;
       while (el && el !== svg) {
         if (el.classList && el.classList.contains("markmap-node")) break;
         el = el.parentElement;
       }
-      if (!el || el === svg) return;
-      // markmap-view 内部点 g 元素上的 circle 是折叠/展开;我们只在 foreignObject 区域响应。
-      // 简单办法:如果点的是 circle 直接放过
-      const target = e.target as Element;
-      if (target && target.tagName === "circle") return;
-      // d3 把数据挂在 __data__ 上
+      if (!el || el === svg) return null;
       const datum = (el as unknown as { __data__?: { payload?: { featureRef?: FeatureRef } } })
         .__data__;
-      const ref = datum?.payload?.featureRef;
+      return datum?.payload?.featureRef ?? null;
+    };
+
+    const lookupPreview = (ref: FeatureRef): FeaturePointPreview | null => {
+      const mods = dataRef.current;
+      if (!mods) return null;
+      const mw = mods.find((m) => m.module.name === ref.moduleId);
+      return mw?.features.find((f) => f.id === ref.featureId) ?? null;
+    };
+
+    const cancelHoverClose = () => {
+      if (hoverCloseTimerRef.current !== null) {
+        window.clearTimeout(hoverCloseTimerRef.current);
+        hoverCloseTimerRef.current = null;
+      }
+    };
+
+    const onClick = (e: MouseEvent) => {
+      // markmap-view circle 是折叠/展开控件,放过
+      const target = e.target as Element;
+      if (target && target.tagName === "circle") return;
+      const ref = findFeatureRefAt(target);
       if (ref) {
+        cancelHoverClose();
+        setHovered(null);
         setOpenFeature(ref);
       }
     };
+
+    const onMouseOver = (e: MouseEvent) => {
+      const target = e.target as Element;
+      if (target && target.tagName === "circle") return;
+      const ref = findFeatureRefAt(target);
+      if (!ref) return;
+      const preview = lookupPreview(ref);
+      if (!preview) return;
+      cancelHoverClose();
+      setHovered({ ref, preview, anchor: { x: e.clientX, y: e.clientY } });
+    };
+
+    const onMouseOut = (e: MouseEvent) => {
+      const target = e.target as Element;
+      if (target && target.tagName === "circle") return;
+      const ref = findFeatureRefAt(target);
+      if (!ref) return;
+      // 启动延时关闭;若鼠标移入卡片,卡片自己会调 onMouseEnter 取消该定时器
+      cancelHoverClose();
+      hoverCloseTimerRef.current = window.setTimeout(() => {
+        setHovered(null);
+        hoverCloseTimerRef.current = null;
+      }, 300);
+    };
+
     svg.addEventListener("click", onClick);
-    return () => svg.removeEventListener("click", onClick);
+    svg.addEventListener("mouseover", onMouseOver);
+    svg.addEventListener("mouseout", onMouseOut);
+    return () => {
+      svg.removeEventListener("click", onClick);
+      svg.removeEventListener("mouseover", onMouseOver);
+      svg.removeEventListener("mouseout", onMouseOut);
+      cancelHoverClose();
+    };
   }, [tree]);
 
   if (error) {
@@ -250,47 +325,80 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
         </ViewToggleButton>
       </div>
 
-      {viewMode === "markmap" ? (
-        <>
-          <GlobalFeedbackPanel productId={productId} scope="feature" />
-          <div className="px-5 pt-3 pb-2 text-[11px] text-slate-500">
-            <span className="font-medium text-slate-700">{data.length}</span> 个模块 ·{" "}
-            <span className="font-medium text-slate-700">
-              {data.reduce((acc, m) => acc + m.features.length, 0)}
-            </span>{" "}
-            个功能点 · 点击叶节点查看反馈池 · 标 ⚠ 表示有等待 Agent 处理的反馈
-          </div>
-          <div
-            className="relative flex-1 overflow-hidden border-t border-slate-200 bg-slate-50"
-            onWheel={(e) => {
-              // 阻止滚轮事件冒泡到 document,防止整个 Atlas 页面跟着滚
-              // markmap 内部自己监听 wheel 做缩放/平移,不需要冒泡
-              e.stopPropagation();
-            }}
+      {/* markmap 区始终挂载,切流程图时用 display:none 隐藏 —— 避免 React 卸载 SVG
+          导致 d3 zoom 在脱离 DOM 的 SVG 上读 SVGLength 抛错 + Markmap 实例需重建。
+          切回后 SVG 元素是同一个,Markmap 实例 + d3 状态都保留,布局立即可见。 */}
+      <div className={`flex min-h-0 flex-1 flex-col ${viewMode === "markmap" ? "" : "hidden"}`}>
+        <GlobalFeedbackPanel productId={productId} scope="feature" />
+        <div className="px-5 pt-3 pb-2 text-[11px] text-slate-500">
+          <span className="font-medium text-slate-700">{data.length}</span> 个模块 ·{" "}
+          <span className="font-medium text-slate-700">
+            {data.reduce((acc, m) => acc + m.features.length, 0)}
+          </span>{" "}
+          个功能点 · 悬停叶节点看决策者视角 + 快速投反馈 · 点击看完整详情 ·{" "}
+          <span title="7 天内新建未审">🆕新增</span>{" "}
+          <span title="决策者已标已审">✅已审</span>{" "}
+          <span title="反馈池待 Agent 处理">💬反馈</span>{" "}
+          <span title="frontmatter needs_revision=true">⚠待 Agent</span>
+        </div>
+        <div
+          className="relative flex-1 overflow-hidden border-t border-slate-200 bg-slate-50"
+          onWheel={(e) => {
+            // 阻止滚轮事件冒泡到 document,防止整个 Atlas 页面跟着滚
+            e.stopPropagation();
+          }}
+        >
+          <svg
+            ref={svgRef}
+            className="h-full w-full cursor-pointer"
+            style={{ touchAction: "none" }}
+          />
+          <button
+            className="absolute bottom-4 right-4 rounded-full bg-slate-900 px-4 py-2 text-xs font-medium text-white shadow-lg hover:bg-slate-800"
+            onClick={() => setPromptOpen("revise")}
+            title="把 needs_revision=true 的 feature 反馈 + 全局需求 拼成 prompt 给 Claude Code 跑"
+            type="button"
           >
-            <svg
-              ref={svgRef}
-              className="h-full w-full cursor-pointer"
-              style={{ touchAction: "none" }}
-            />
-            <button
-              className="absolute bottom-4 right-4 rounded-full bg-slate-900 px-4 py-2 text-xs font-medium text-white shadow-lg hover:bg-slate-800"
-              onClick={() => setPromptOpen("revise")}
-              title="把 needs_revision=true 的 feature 反馈 + 全局需求 拼成 prompt 给 Claude Code 跑"
-              type="button"
-            >
-              📋 复制全局 revise prompt
-            </button>
-          </div>
-        </>
-      ) : (
+            📋 复制全局 revise prompt
+          </button>
+        </div>
+      </div>
+      {viewMode === "flowchart" ? (
         <FlowchartView
           productId={productId}
           onOpenFeature={(moduleId, featureId) =>
             setOpenFeature({ moduleId, featureId })
           }
         />
-      )}
+      ) : null}
+
+      {/* hover card 仅在 markmap 视图显示;开了 FeatureModal 就不再叠浮卡(避免视觉打架) */}
+      {viewMode === "markmap" && hovered && !openFeature ? (
+        <FeatureHoverCard
+          productId={productId}
+          moduleId={hovered.ref.moduleId}
+          preview={hovered.preview}
+          anchor={hovered.anchor}
+          onMouseEnter={() => {
+            if (hoverCloseTimerRef.current !== null) {
+              window.clearTimeout(hoverCloseTimerRef.current);
+              hoverCloseTimerRef.current = null;
+            }
+          }}
+          onMouseLeave={() => {
+            setHovered(null);
+          }}
+          onChanged={() => {
+            void loadList();
+            // 重新拉数据后,先关掉浮卡 — 新的 preview 会在用户再 hover 时拿到
+            setHovered(null);
+          }}
+          onOpenDetail={() => {
+            setHovered(null);
+            setOpenFeature(hovered.ref);
+          }}
+        />
+      ) : null}
 
       {openFeature ? (
         <FeatureModal
@@ -445,10 +553,28 @@ function buildFeatureNode(
   moduleId: string,
   roleIdToName: Map<string, string>
 ): IPureNode {
-  const warnSuffix =
-    f.needs_revision || f.feedbackCount > 0
-      ? ` <span style="color:#d97706;font-weight:600">⚠</span>`
-      : "";
+  // 状态徽章拼接(顺序固定:🆕 / ✅ / 💬N / ⚠)
+  const badges: string[] = [];
+  const isNew = !f.reviewed_at && isRecentlyCreated(f.created_at);
+  if (isNew) {
+    badges.push(`<span style="color:#0ea5e9;font-weight:600" title="7 天内新建,尚未审阅">🆕</span>`);
+  }
+  if (f.reviewed_at) {
+    badges.push(
+      `<span style="color:#059669;font-weight:600" title="决策者已审 · ${escapeHtml(f.reviewed_at)}">✅</span>`
+    );
+  }
+  if (f.feedbackCount > 0) {
+    badges.push(
+      `<span style="color:#d97706;font-weight:600" title="${f.feedbackCount} 条反馈待 Agent 处理">💬${f.feedbackCount}</span>`
+    );
+  }
+  if (f.needs_revision) {
+    badges.push(
+      `<span style="color:#dc2626;font-weight:600" title="frontmatter needs_revision=true · 等 Agent 重做">⚠</span>`
+    );
+  }
+  const badgeSuffix = badges.length > 0 ? ` ${badges.join(" ")}` : "";
   const roleNames =
     f.roles && f.roles.length > 0
       ? f.roles.map((id) => roleIdToName.get(id) ?? `${id} ⚠`).join(" ")
@@ -457,7 +583,7 @@ function buildFeatureNode(
     ? ` <span style="color:#64748b;font-weight:400;font-size:0.85em">· ${escapeHtml(roleNames)}</span>`
     : "";
   return {
-    content: escapeHtml(f.name) + warnSuffix + roleSuffix,
+    content: escapeHtml(f.name) + badgeSuffix + roleSuffix,
     payload: {
       featureRef: { moduleId, featureId: f.id }
     },

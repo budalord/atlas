@@ -285,6 +285,9 @@ export async function loadModulesWithFeatures(
       pendingPreview: f.clues.pending.slice(0, 3).map((c) => c.content.slice(0, 80)),
       feedbackCount: f.feedback?.length ?? 0,
       needs_revision: f.needs_revision === true,
+      decisionMakerView: f.decision_maker_view,
+      created_at: f.created_at,
+      ...(f.reviewed_at ? { reviewed_at: f.reviewed_at } : {}),
       ...(f.roles && f.roles.length > 0 ? { roles: f.roles } : {}),
       ...(f.module_group ? { module_group: f.module_group } : {}),
       ...(f.entities_touched && f.entities_touched.length > 0

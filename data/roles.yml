@@ -35,3 +35,6 @@ roles:
   - id: principal
     name: 校长
     note: 全局视野 · 跨校区 · 关键决策
+  - id: sys
+    name: 系统
+    note: 自动触发的系统行为(非人工角色)

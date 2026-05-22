@@ -149,6 +149,40 @@ featuresRouter.patch("/:fid/roles", async (req: FeatureReq, res, next) => {
 });
 
 /**
+ * PATCH /api/products/:id/features/:fid/review
+ *   body: { action: "mark" | "unmark", by?: string }
+ *
+ * 决策者审阅戳。mark 写 frontmatter.reviewed_at = today + 可选 reviewed_by;
+ * unmark 抹掉两个字段(回到"待审")。
+ */
+featuresRouter.patch("/:fid/review", async (req: FeatureReq, res, next) => {
+  try {
+    const action = req.body?.action;
+    if (action !== "mark" && action !== "unmark") {
+      res.status(400).json({ error: 'action must be "mark" or "unmark"' });
+      return;
+    }
+    const by = typeof req.body?.by === "string" ? req.body.by.trim() : "";
+
+    const located = await loadFeature(req.params.id, req.params.fid);
+    if (!located) {
+      res.status(404).json({ error: "Feature not found" });
+      return;
+    }
+    const filePath = featureFilePath(req.params.id, located.moduleName, req.params.fid);
+    const source = await fs.readFile(filePath, "utf8");
+    const today = new Date().toISOString().slice(0, 10);
+    const next$ = setFrontmatterReview(source, action === "mark" ? { date: today, by: by || undefined } : null);
+    await fs.writeFile(filePath, next$, "utf8");
+
+    const updated = parseFeatureMarkdown(req.params.fid, next$);
+    res.json({ data: updated, version: getDataVersion() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
  * GET /api/products/:id/features/:fid — 单个功能点完整数据 + 所属模块的 ModuleSpec 字段。
  */
 featuresRouter.get("/:fid", async (req: FeatureReq, res, next) => {
@@ -332,6 +366,43 @@ function sanitizeRolesInput(input: unknown): string[] {
     out.push(id);
   }
   return out;
+}
+
+/**
+ * 写 / 抹 frontmatter 的 reviewed_at + reviewed_by。
+ *   - patch !== null:写 reviewed_at=patch.date(必填);patch.by 非空才写 reviewed_by
+ *   - patch === null:抹掉 reviewed_at + reviewed_by(回到"待审")
+ *   - frontmatter 不存在:仅在 patch !== null 时补一段最小 frontmatter
+ */
+export function setFrontmatterReview(
+  source: string,
+  patch: { date: string; by?: string } | null
+): string {
+  const match = source.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  if (!match) {
+    if (!patch) return source;
+    const fm: Record<string, unknown> = { reviewed_at: patch.date };
+    if (patch.by) fm.reviewed_by = patch.by;
+    return `---\n${YAML.stringify(fm).trim()}\n---\n${source}`;
+  }
+  const fm = (YAML.parse(match[1]) ?? {}) as Record<string, unknown>;
+  if (patch) {
+    fm.reviewed_at = patch.date;
+    if (patch.by) {
+      fm.reviewed_by = patch.by;
+    } else {
+      delete fm.reviewed_by;
+    }
+  } else {
+    delete fm.reviewed_at;
+    delete fm.reviewed_by;
+  }
+  const fmText = Object.keys(fm).length === 0 ? "" : YAML.stringify(fm).trim();
+  const body = match[2];
+  if (fmText.length === 0) {
+    return body.replace(/^\n+/, "");
+  }
+  return `---\n${fmText}\n---\n${body}`;
 }
 
 /**

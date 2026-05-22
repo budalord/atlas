@@ -1,10 +1,16 @@
 import { Router, Request } from "express";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { FlowchartData, FlowchartQuestion } from "@atlas/shared";
+import type {
+  FlowchartData,
+  FlowchartQuestion,
+  ModuleFlowchartData,
+  ModuleFlowchartListData
+} from "@atlas/shared";
 import { DATA_ROOT, dataPath, listMarkdownFiles, listDirectories } from "../services/fileReader";
 import { getDataVersion } from "../services/watcher";
 import { parseYaml } from "../services/markdownParser";
+import { loadModules, loadFeatures } from "../services/entityLoader";
 
 export const flowchartsRouter = Router({ mergeParams: true });
 
@@ -66,6 +72,137 @@ flowchartsRouter.get("/", async (req: Request<{ id: string }>, res, next) => {
     next(e);
   }
 });
+
+/**
+ * GET /api/products/:id/flowcharts/by-module
+ *
+ * 决策者流程图(per-module 切分版)。读 data/products/{id}/derived/flowcharts/by-module/
+ * 下所有 <moduleId>.mmd + 同目录 questions.md。
+ * 返回每个模块的状态(含 mermaid 内容、stale、feature count),供前端 tab UI 切换。
+ */
+flowchartsRouter.get("/by-module", async (req: Request<{ id: string }>, res, next) => {
+  try {
+    const productId = req.params.id;
+    const modules = await loadModules(productId);
+
+    const moduleResults: ModuleFlowchartData[] = [];
+    for (const mod of modules) {
+      const features = await loadFeatures(productId, mod.name);
+      const mmdPath = dataPath(
+        "products",
+        productId,
+        "derived",
+        "flowcharts",
+        "by-module",
+        `${mod.name}.mmd`
+      );
+      const mmdContent = await readFileOrNull(mmdPath);
+      const exists = mmdContent !== null;
+      const mmdMtime = await safeMtime(mmdPath);
+      const generated_at = exists
+        ? extractModuleHeaderTimestamp(mmdContent!) ?? mmdMtime
+        : null;
+      // Stale 判定:该 module 下任一 feature.md 的 mtime > .mmd mtime → stale
+      const { stale, stale_reason } = await computeModuleStale(
+        productId,
+        mod.name,
+        mmdMtime
+      );
+      moduleResults.push({
+        moduleId: mod.name,
+        moduleName: mod.name,
+        moduleTitle: mod.title ?? null,
+        featureCount: features.length,
+        mermaid: mmdContent,
+        exists,
+        generated_at,
+        stale,
+        stale_reason
+      });
+    }
+
+    // 聚合 questions(by-module 下统一一份 questions.md)
+    const qPath = dataPath(
+      "products",
+      productId,
+      "derived",
+      "flowcharts",
+      "by-module",
+      "questions.md"
+    );
+    const qContent = await readFileOrNull(qPath);
+    const { questions, errors } = parseQuestions(qContent);
+    const lintErrors = await lintTriggers(questions);
+    const allErrors = [...errors, ...lintErrors];
+
+    const data: ModuleFlowchartListData = {
+      modules: moduleResults,
+      questions,
+      questions_lint_ok: allErrors.length === 0,
+      questions_lint_errors: allErrors
+    };
+    res.json({ data, version: getDataVersion() });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/** 解析 by-module/<m>.mmd 头部 "%% 生成时间: <iso>" 或 "%% Generated at: <iso>" */
+function extractModuleHeaderTimestamp(content: string): string | null {
+  const head = content.split("\n").slice(0, 10).join("\n");
+  const m =
+    head.match(/%%\s*生成时间[::]\s*([^\s]+)/) ||
+    head.match(/%%\s*Generated\s+at:\s*([^\s]+)/i);
+  return m ? m[1].trim() : null;
+}
+
+/**
+ * Per-module stale 判定:该模块下任一 features/*.md / MODULE.md 比 .mmd 新 → stale。
+ */
+async function computeModuleStale(
+  productId: string,
+  moduleId: string,
+  mmdMtime: string | null
+): Promise<{ stale: boolean; stale_reason: string | null }> {
+  if (!mmdMtime) return { stale: false, stale_reason: null };
+  const mmdMs = Date.parse(mmdMtime);
+
+  const candidates: Array<{ label: string; absPath: string }> = [];
+  candidates.push({
+    label: `${moduleId}/MODULE.md`,
+    absPath: dataPath("products", productId, "modules", moduleId, "MODULE.md")
+  });
+  try {
+    const files = await listMarkdownFiles(
+      "products",
+      productId,
+      "modules",
+      moduleId,
+      "features"
+    );
+    for (const f of files) {
+      candidates.push({
+        label: `${moduleId}/${f.replace(/\.md$/, "")}`,
+        absPath: dataPath("products", productId, "modules", moduleId, "features", f)
+      });
+    }
+  } catch {
+    /* no features dir */
+  }
+
+  let newest: { label: string; mtime: number } | null = null;
+  for (const c of candidates) {
+    const m = await getFileMtimeMs(c.absPath);
+    if (m === null) continue;
+    if (!newest || m > newest.mtime) newest = { label: c.label, mtime: m };
+  }
+  if (!newest) return { stale: false, stale_reason: null };
+  if (newest.mtime <= mmdMs) return { stale: false, stale_reason: null };
+  return {
+    stale: true,
+    stale_reason: `${newest.label} 在 ${new Date(newest.mtime).toISOString()} 修改晚于流程图(${mmdMtime})`
+  };
+}
 
 async function readFileOrNull(absPath: string): Promise<string | null> {
   try {

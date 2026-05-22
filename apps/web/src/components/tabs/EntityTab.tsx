@@ -1,9 +1,18 @@
-import { useEffect, useState } from "react";
-import type { ApiEnvelope, EntitySpec, ModuleSpec } from "../../types";
+import { useCallback, useEffect, useState } from "react";
+import type {
+  ApiEnvelope,
+  DerivedEntitiesData,
+  DerivedEntity,
+  DerivedEntityQuestionsData,
+  EntityReconcileReport,
+  EntitySpec,
+  ModuleSpec
+} from "../../types";
 import { useDataChange } from "../../lib/useDataChange";
 import { CreateIssueDialog } from "../CreateIssueDialog";
 import { FeedbackPool } from "../FeedbackPool";
 import { GlobalFeedbackPanel } from "../GlobalFeedbackPanel";
+import { MarkdownRenderer } from "../MarkdownRenderer";
 import { PromptModalDialog, type PromptMode } from "../PromptModalDialog";
 
 interface EntityTabProps {
@@ -12,8 +21,64 @@ interface EntityTabProps {
 }
 
 type ViewMode = "by-module" | "all";
+type SubTab = "declared" | "derived";
 
 export function EntityTab({ productId, readOnly = false }: EntityTabProps) {
+  const [subTab, setSubTab] = useState<SubTab>("declared");
+
+  return (
+    <div className="relative flex min-h-0 flex-col">
+      <nav className="flex items-center gap-1 border-b border-slate-200 bg-slate-50 px-5">
+        <SubTabButton
+          active={subTab === "declared"}
+          label="声明"
+          onClick={() => setSubTab("declared")}
+        />
+        <SubTabButton
+          active={subTab === "derived"}
+          label="派生"
+          onClick={() => setSubTab("derived")}
+        />
+        <span className="ml-3 text-[11px] text-slate-500">
+          {subTab === "declared"
+            ? "声明实体:用户/Agent 直接写的 source(modules/<m>/entities/* + entities/*)"
+            : "派生实体:Path C — 由 features + SEAMS + DECISIONS + ENTITIES-OWNERSHIP 派生(只读)"}
+        </span>
+      </nav>
+      {subTab === "declared" ? (
+        <DeclaredEntitiesPanel productId={productId} readOnly={readOnly} />
+      ) : (
+        <DerivedEntitiesPanel productId={productId} readOnly={readOnly} />
+      )}
+    </div>
+  );
+}
+
+function SubTabButton({
+  active,
+  label,
+  onClick
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className={`-mb-px border-b-2 px-3 py-2 text-sm transition ${
+        active
+          ? "border-slate-900 font-semibold text-slate-950"
+          : "border-transparent text-slate-500 hover:text-slate-800"
+      }`}
+      onClick={onClick}
+      type="button"
+    >
+      {label}
+    </button>
+  );
+}
+
+function DeclaredEntitiesPanel({ productId, readOnly = false }: EntityTabProps) {
   const [entities, setEntities] = useState<EntitySpec[] | null>(null);
   const [modules, setModules] = useState<ModuleSpec[]>([]);
   const [view, setView] = useState<ViewMode>("by-module");
@@ -490,4 +555,316 @@ function buildEntityIssueBody(entity: EntitySpec, productId: string): string {
     "## 修改诉求",
     "<!-- 请在此填写要修改/新增的内容 -->"
   ].join("\n");
+}
+
+/* ============================================================
+ *  派生实体面板 (Path C)
+ * ============================================================ */
+function DerivedEntitiesPanel({ productId, readOnly = false }: EntityTabProps) {
+  const [data, setData] = useState<DerivedEntitiesData | null>(null);
+  const [questions, setQuestions] = useState<DerivedEntityQuestionsData | null>(null);
+  const [reconcile, setReconcile] = useState<EntityReconcileReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [promptOpen, setPromptOpen] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const [r1, r2, r3] = await Promise.all([
+        fetch(`/api/products/${productId}/derived-entities`),
+        fetch(`/api/products/${productId}/derived-entities/questions`),
+        fetch(`/api/products/${productId}/derived-entities/reconcile`)
+      ]);
+      if (!r1.ok) throw new Error(`derived-entities ${r1.status}`);
+      if (!r2.ok) throw new Error(`derived-entities/questions ${r2.status}`);
+      if (!r3.ok) throw new Error(`derived-entities/reconcile ${r3.status}`);
+      const e = (await r1.json()) as ApiEnvelope<DerivedEntitiesData>;
+      const q = (await r2.json()) as ApiEnvelope<DerivedEntityQuestionsData>;
+      const c = (await r3.json()) as ApiEnvelope<EntityReconcileReport>;
+      setData(e.data);
+      setQuestions(q.data);
+      setReconcile(c.data);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "加载失败");
+    }
+  }, [productId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useDataChange(() => {
+    void load();
+  });
+
+  if (error) return <div className="p-5 text-sm text-rose-700">{error}</div>;
+  if (data === null) return <div className="p-5 text-xs text-slate-500">加载中...</div>;
+
+  const hasQuestionsLint = questions && !questions.questions_lint_ok && questions.questions_lint_errors.length > 0;
+
+  return (
+    <div className="flex min-h-0 flex-col overflow-auto">
+      {/* 顶部工具栏 */}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-5 py-2">
+        <div className="text-[12px] text-slate-600">
+          {data.exists ? (
+            <>
+              <span className="font-medium text-slate-900">{data.entities.length}</span> 个派生实体
+              {data.generated_at ? (
+                <span className="ml-2 text-slate-500">· 生成于 {formatTime(data.generated_at)}</span>
+              ) : null}
+            </>
+          ) : (
+            <span className="text-slate-500">尚无派生实体</span>
+          )}
+        </div>
+        {!readOnly ? (
+          <button
+            className="rounded border border-slate-300 bg-white px-3 py-1 text-[11px] font-medium text-slate-700 hover:border-slate-900 hover:text-slate-900"
+            onClick={() => setPromptOpen(true)}
+            title="生成 Path C 派生 prompt(复制后给外部 Agent 跑)"
+            type="button"
+          >
+            📋 派生 Agent · {data.exists ? "重派生" : "生成派生实体"}
+          </button>
+        ) : null}
+      </div>
+
+      {/* stale 横幅 */}
+      {data.stale ? (
+        <div className="border-b border-amber-200 bg-amber-50 px-5 py-2 text-[12px] text-amber-900">
+          ⚠ 派生已过期:{data.stale_reason}
+        </div>
+      ) : null}
+
+      {/* questions.md 横幅 */}
+      {questions && questions.exists && questions.questions.length > 0 ? (
+        <div className={`border-b px-5 py-2 text-[12px] ${
+          hasQuestionsLint
+            ? "border-rose-200 bg-rose-50 text-rose-800"
+            : "border-orange-200 bg-orange-50 text-orange-800"
+        }`}>
+          <div className="font-medium">
+            📋 派生 Agent 抛了 {questions.questions.length} 个 question(待源端澄清){hasQuestionsLint ? " · ⚠ 含 trigger lint 错误" : ""}
+          </div>
+          {hasQuestionsLint ? (
+            <ul className="mt-1 list-disc pl-5 text-[11px]">
+              {questions.questions_lint_errors.slice(0, 3).map((e, i) => (
+                <li key={i}>{e}</li>
+              ))}
+              {questions.questions_lint_errors.length > 3 ? (
+                <li>... ({questions.questions_lint_errors.length - 3} more)</li>
+              ) : null}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* 空态 */}
+      {!data.exists ? (
+        <div className="m-5 rounded-md border border-dashed border-slate-300 bg-white p-6 text-center text-[13px] leading-6 text-slate-600">
+          <div className="text-[14px] font-medium text-slate-900">尚未生成派生实体</div>
+          <div className="mt-1 text-slate-500">
+            Path C 派生从 features + SEAMS + DECISIONS + ENTITIES-OWNERSHIP 派生实体清单。
+          </div>
+          {!readOnly ? (
+            <button
+              className="mt-3 rounded bg-slate-900 px-4 py-1.5 text-[12px] text-white hover:bg-slate-800"
+              onClick={() => setPromptOpen(true)}
+              type="button"
+            >
+              📋 复制派生 prompt
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* questions 列表(简略) */}
+      {questions && questions.questions.length > 0 ? (
+        <details className="border-b border-slate-200 bg-white px-5 py-2">
+          <summary className="cursor-pointer text-[12px] font-medium text-slate-800">
+            ▸ 完整 questions 列表 ({questions.questions.length})
+          </summary>
+          <ul className="mt-2 space-y-2">
+            {questions.questions.map((q, i) => (
+              <li className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-[12px]" key={i}>
+                <div className="font-medium text-slate-900">{q.question}</div>
+                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-500">
+                  <span>feature: {q.feature}</span>
+                  <span>module: {q.module}</span>
+                  <span>trigger: <code className="font-mono">{q.trigger.feature_path}</code></span>
+                </div>
+                {q.proposed_resolution ? (
+                  <div className="mt-1 text-[11px] text-emerald-700">
+                    建议处理:{q.proposed_resolution}
+                  </div>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+
+      {/* reconcile 报告 */}
+      {reconcile && reconcile.exists ? (
+        <details className="border-b border-slate-200 bg-white px-5 py-2" open>
+          <summary className="cursor-pointer text-[12px] font-medium text-slate-800">
+            ▾ Reconcile 报告:派生 vs ENTITIES-OWNERSHIP 声明
+            <span className="ml-2 text-[11px] font-normal text-slate-500">
+              派生有声明无 {reconcile.derivedOnly.length} · 声明有派生无 {reconcile.declaredOnly.length} · 归属不一致 {reconcile.layerMismatch.length}
+            </span>
+          </summary>
+          <div className="mt-2 grid grid-cols-1 gap-3 text-[12px] lg:grid-cols-3">
+            <ReconcileSection diffs={reconcile.derivedOnly} title="派生有声明无" tone="amber" />
+            <ReconcileSection diffs={reconcile.declaredOnly} title="声明有派生无" tone="slate" />
+            <ReconcileSection diffs={reconcile.layerMismatch} title="归属不一致" tone="rose" />
+          </div>
+        </details>
+      ) : null}
+
+      {/* 派生实体卡片列表 */}
+      {data.entities.length > 0 ? (
+        <ul className="m-5 grid grid-cols-1 gap-3 lg:grid-cols-2">
+          {data.entities.map((entity) => (
+            <li key={entity.name}>
+              <DerivedEntityCard entity={entity} />
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {promptOpen ? (
+        <PromptModalDialog
+          mode="generate"
+          onClose={() => setPromptOpen(false)}
+          productId={productId}
+          scope="entity-derive"
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function ReconcileSection({
+  title,
+  diffs,
+  tone
+}: {
+  title: string;
+  diffs: EntityReconcileReport["derivedOnly"];
+  tone: "amber" | "slate" | "rose";
+}) {
+  const toneCls = {
+    amber: "border-amber-200 bg-amber-50/40",
+    slate: "border-slate-200 bg-slate-50",
+    rose: "border-rose-200 bg-rose-50/40"
+  }[tone];
+  return (
+    <div className={`rounded-md border px-3 py-2 ${toneCls}`}>
+      <div className="text-[12px] font-medium text-slate-900">
+        {title}{" "}
+        <span className="text-[10px] font-normal text-slate-500">({diffs.length})</span>
+      </div>
+      {diffs.length === 0 ? (
+        <div className="mt-1 text-[11px] italic text-slate-400">—</div>
+      ) : (
+        <ul className="mt-1 space-y-1">
+          {diffs.map((d, i) => (
+            <li className="text-[11px] leading-5" key={i}>
+              <span className="font-mono font-semibold text-slate-800">{d.name}</span>
+              {d.declaredLayer ? <span className="ml-1 text-slate-500">·声明:{d.declaredLayer}</span> : null}
+              {d.derivedLayer ? <span className="ml-1 text-slate-500">·派生:{d.derivedLayer}</span> : null}
+              {d.derivedNote ? <span className="ml-1 text-slate-600">·{d.derivedNote}</span> : null}
+              {d.suggestion ? <div className="text-slate-600">{d.suggestion}</div> : null}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function DerivedEntityCard({ entity }: { entity: DerivedEntity }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-md border border-slate-200 bg-white">
+      <button
+        className="flex w-full items-baseline gap-3 px-4 py-2 text-left hover:bg-slate-50"
+        onClick={() => setOpen((v) => !v)}
+        type="button"
+      >
+        <span className="text-slate-500">{open ? "▾" : "▸"}</span>
+        <span className="font-mono text-[13px] font-semibold text-slate-900">{entity.name}</span>
+        <span className="text-[11px] text-slate-500">{entity.layer}</span>
+        <span className="ml-auto text-[10px] text-slate-400">
+          features × {entity.sourceFeatures.length}
+          {entity.sourceSeams.length > 0 ? ` · seams × ${entity.sourceSeams.length}` : ""}
+          {entity.sourceDecisions.length > 0 ? ` · decisions × ${entity.sourceDecisions.length}` : ""}
+        </span>
+      </button>
+      {open ? (
+        <div className="border-t border-slate-100 bg-slate-50 px-4 py-3">
+          <div className="grid grid-cols-2 gap-2 text-[11px]">
+            <div>
+              <span className="text-slate-500">维护:</span>
+              <span className="ml-1 text-slate-800">{entity.maintainers}</span>
+            </div>
+            <div>
+              <span className="text-slate-500">生成于:</span>
+              <span className="ml-1 text-slate-800">{entity.generated_at ? formatTime(entity.generated_at) : "—"}</span>
+            </div>
+          </div>
+          {entity.sourceFeatures.length > 0 ? (
+            <div className="mt-2 text-[11px]">
+              <span className="text-slate-500">来源 features:</span>
+              <div className="mt-0.5 flex flex-wrap gap-1">
+                {entity.sourceFeatures.map((f) => (
+                  <code key={f} className="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-[10px] text-slate-700">
+                    {f}
+                  </code>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {entity.sourceSeams.length > 0 ? (
+            <div className="mt-2 text-[11px]">
+              <span className="text-slate-500">来源 seams:</span>
+              <div className="mt-0.5 flex flex-wrap gap-1">
+                {entity.sourceSeams.map((s) => (
+                  <code key={s} className="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-[10px] text-slate-700">
+                    {s}
+                  </code>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {entity.sourceDecisions.length > 0 ? (
+            <div className="mt-2 text-[11px]">
+              <span className="text-slate-500">来源 decisions:</span>
+              <div className="mt-0.5 flex flex-wrap gap-1">
+                {entity.sourceDecisions.map((d) => (
+                  <code key={d} className="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-[10px] text-slate-700">
+                    {d}
+                  </code>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          <div className="mt-3 prose prose-sm max-w-none">
+            <MarkdownRenderer markdown={entity.body} />
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function formatTime(iso: string): string {
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toISOString().slice(0, 16).replace("T", " ");
+  } catch {
+    return iso;
+  }
 }

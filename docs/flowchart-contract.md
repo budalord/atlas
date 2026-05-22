@@ -271,7 +271,87 @@ User.delete.all <<roles: 管理员>>
 - 陷阱 5（§3.2）：Agent 用伞名（`SelfData`）把多个真实独立实体包装成一个 —— **错把多个合一**
 - §3.4：Agent 用多个名字（`Student` + `User`）把同一持久化实体拆成多个 —— **错把一个分多**
 
-两种错误方向相反，但都是 Entity 命名上的偏差，都会让派生失真。
+两种错误方向相反，但都是 Entity 命名上的偏差,都会让派生失真。
+
+### 3.4.1 不可过度折叠规则(over-folding)
+
+**规则**:同名规范是为消除"同表多名"(over-production),**不可反过来把多个真实独立实体合并到一个名下**(under-production / over-folding)。
+
+**判定:何时坚决不要合并**
+
+| 信号 | 必须拆分 |
+|------|---------|
+| 不同生命周期(销售签单的 Teacher 师资档案 vs 课表上某天的代课 Teacher 任命) | ✓ 拆 → `Teacher` + `Substitution` |
+| 角色 vs 实体关系混淆(学员 student 是 User 的 role,但 Student 学籍档案 = 单独实体) | ✓ 在角色层用 `student`,在档案层用 `Student` 或 `User` 二选一,不可全合并 |
+| 字段集差异 ≥50%(订单的 partner_id vs 学员的 referrer_id,虽都引用人,但承载字段不同) | ✓ 拆 |
+| 业务方一致性(销售线维护 vs 教务线维护) 不一致 | ✓ 倾向拆 |
+
+**反例 — 过度折叠**:
+
+```mermaid
+%% ✗ 错误:把"师资档案"和"代课记录"折叠到 Teacher
+Teacher.create.all <<roles: 教务老师>>    %% 实际是创建师资档案(Teacher 实体)
+Teacher.create.schedule <<roles: 教务老师>> %% 实际是登记代课(Substitution 实体)
+
+%% ✓ 正确:分两个实体
+Teacher.create.all <<roles: 教务老师>>
+Substitution.create.all <<roles: 教务老师>>
+```
+
+**反例 — Product 4 子实体被合并**:
+
+```mermaid
+%% ✗ 错误:把 Product / ProductServiceDefinition / ProductPricingDefinition / ProductVersion 都叫 Product
+Product.create.all <<roles: 销售>>
+Product.maintain.all <<roles: 教务老师>>  %% 实际是维护 ProductServiceDefinition
+Product.priceUpdate.all <<roles: 销售>>   %% 实际是 ProductPricingDefinition
+
+%% ✓ 正确:按持久化边界拆
+Product.create.all <<roles: 销售, 教务老师>>     %% 主体实体
+ProductServiceDefinition.maintain.all <<roles: 教务老师>>
+ProductPricingDefinition.update.all <<roles: 销售>>
+%% (ProductVersion 是仅追加的版本快照,通常由系统写,不出现在 user-driven 流程图)
+```
+
+**Agent 判断"是否过度折叠"的启发式**:
+
+1. 在生成"建议规范名映射表"时(§3.4 第 3 步),**额外列**该名字下计划合并的所有动作 + roles
+2. 如果同一个名字下出现两个截然不同的(action, role)组合(如 `create.all <<销售>>` 和 `maintain.all <<教务老师>>`),**重新审视是否真的同一持久化边界**
+3. 拿不准时走 questions.md,把"业务名词 X 是 1 个实体还是 N 个实体?"写成一条 question
+
+### 3.4.2 标准命名词表(参考用,非强制)
+
+下表是 ERP / 教育业务常见实体的**约定规范名**,Agent 在生成"建议规范名映射表"时优先采纳这些。**不强制**——若产品有更恰当的本地名,可用本地名,但应在生成计划中说明。
+
+| 中文常用别名 | 规范名 | 备注 |
+|------------|--------|------|
+| 学员 / 学生 / 用户 / 账号 | `User` 或 `Student` | 跨产品共享身份时用 User;仅本系统独立学籍可用 Student |
+| 产品 / 服务 / 课程 | `Product` | 销售意义上的售卖单位 |
+| 产品服务清单(教务侧) | `ProductServiceDefinition` | 见 §3.4.1 |
+| 产品价格定义(销售侧) | `ProductPricingDefinition` | 见 §3.4.1 |
+| 产品版本快照 | `ProductVersion` | 仅追加 |
+| 订单 / 报名记录 | `Order` | |
+| 付款 / 支付记录 | `PaymentRecord` | |
+| 推荐费 / 推荐返利 | `ReferralPayment` | |
+| 销售计提 / 提成 | `Commission` | |
+| 退费 / 退款 | `Refund` | |
+| 教师 / 老师 | `Teacher` | 师资档案(独立实体) |
+| 班级 | `Class` | |
+| 课表 / 排课 / 课次 | `ScheduleEntry` | |
+| 考勤 / 出勤记录 | `AttendanceRecord` | |
+| 代课 / 调课 | `Substitution` | 区别于 Teacher 师资档案 |
+| 请假 | `LeaveRequest` | |
+| 教室 / 课室 | `Classroom` | |
+| 学科 / 科目 | `Subject` | |
+| 院校 | `College` | |
+| 大类(专业大类) | `MajorCategory` | |
+| 方向(专业方向) | `Direction` | |
+| 合作商 / 渠道 | `Partner` | 渠道实体 |
+| 校区 | `Campus` | |
+| 报表 | `Report` | |
+| 报表指标快照 | `MetricSnapshot` | |
+
+跨产品名词的规范名应该和 [docs/atlas-design-proposal.md](atlas-design-proposal.md) 的 "通用术语" 列表(若有)对齐。
 
 ---
 
@@ -460,7 +540,83 @@ grep -F -- "$original_text" "$feature_path"
 
 这条 lint 是 §6.4"禁止隐含节点加戏"的强制执行手段：Agent 想绕道 §6.4 把隐含逻辑包装成 question，trigger 字段会强制它承认"description 里没有原话"，原文为空 → lint 拒绝 → 流程图被打回。
 
-#### 6.3.5 回填路径
+#### 6.3.5 抛问门槛 —— 业务 vs 工程分界
+
+**核心判别**:
+
+> **如果不写代码,光开会能说清楚 → 业务问题 → 可抛**
+> **不写代码说不清,必须看 schema / 接口 / 工程实现 → 工程问题 → Agent 自决,不抛**
+
+#### 4 级自检(抛 question 前必过)
+
+```
+门槛 1 · feature.md 的 description / 字段清单 / 状态转移 中有答案吗?
+        → 有,自决,不抛
+门槛 2 · DECISIONS.md / SEAMS.md / ENTITIES-OWNERSHIP.md 中有答案吗?
+        → 有,自决,不抛
+门槛 3 · 答案能用 grep / 文件存在性 / 简单模式匹配判断吗?
+        (如"X 是否已有独立 feature?" → ls modules/<m>/features/ 即可答)
+        → 能,Agent 自己查,自决,不抛
+门槛 4 · 问题是"业务规则"还是"schema / 工程实现"?
+        → 工程实现 → 自决,可在 main.mmd 头部加 `%% Note: ...` 注释记一笔
+        → 业务规则 → 跳到下一步
+门槛 5 · 已写出 proposed_resolution 了吗?
+        → 写出了,说明已自决 → 直接执行,不抛
+        → 没写,真的不知道答案 → 才可抛
+```
+
+**只有 5 级全过才可抛 question**。
+
+#### 业务 question vs 工程 question 对照表
+
+| ✅ 业务问题(用户该答) | ❌ 工程问题(Agent 自决) |
+|--------|---------|
+| "学员转校区时,他的历史订单跟原校区还是新校区?" | "Order 是否需要独立的 OrderHistory 表?" |
+| "学员推荐人改名后,推荐关系还有效吗?" | "Student 是否需要 referrer_history 字段?" |
+| "SEAMS §5.3 说销售直接通知财务,但 DECISIONS D-27 说要走系统消息 — 哪个为准?" | "通知是用同步调用还是消息队列实现?" |
+| "退费三边契约中,谁有权撤销?" | "Refund 是 Order 的子状态还是独立实体?" |
+| "B 销售复制识别能否覆盖学员手机号自动去重?" | "IntakeText 解析失败是否要重试?" |
+| "调研问卷过期后,未答完的算什么状态?" | "SatisfactionResponse 是否要快照化?" |
+
+**业务问题的特征**:
+- 涉及"谁、什么时候、按什么规则" — 利益相关方需要拍板
+- 答案改变会影响业务行为(而非仅实现细节)
+- 用户能用 1-3 句话答出来,且答案是文字描述
+
+**工程问题的特征**:
+- 涉及"用字段还是表 / 持久化方式 / 接口形式 / 同步异步 / 命名"
+- 答案改变不影响业务行为,只影响实现路径
+- 答案是技术决策,用户答不上来,且答错了对业务无害
+
+#### proposed_resolution 字段的新语义
+
+`proposed_resolution` **不是**"我想这样做,要不要这样"。它是 **"我已经决定这样做"**。
+
+- Agent 能写出 proposed_resolution → 已自决 → **直接执行,不进 questions.md**
+- Agent 真不知道答案(连建议都给不出) → 抛 question,proposed_resolution **留空**
+
+这条规则把"双重确认型"问题(Agent 已经做出选择只是想问一下)从 questions.md 中清除。
+
+#### Agent 工程决策的记录方式(可选)
+
+Agent 自决但想留 trail 时,**不**写 questions.md,改写在 main.mmd 头部:
+
+```mermaid
+%% Generated from data/products/<id>/modules/  · DO NOT EDIT HERE
+%% Source of truth lives in feature points (功能点 tab).
+%% Generated at: <ISO>
+%%
+%% Agent notes (engineering decisions, not blocking):
+%%   - ProductVersion 视为字段(挂 ProductServiceDefinition/PricingDefinition),
+%%     若需独立 lifecycle 请在 feature 加显式 description
+%%   - 通知/退款无独立 feature.md,本图不画,后续补 feature 时入图
+flowchart LR
+  ...
+```
+
+这些注释**不阻塞**用户,但保留 Agent 思路 trail。用户翻 main.mmd 源码能看到,UI 不显示。
+
+#### 6.3.6 回填路径
 
 ```
 用户读 questions.md

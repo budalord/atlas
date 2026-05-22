@@ -9,6 +9,7 @@ import {
 import {
   buildFeatureGeneratePrompt,
   buildEntityGeneratePrompt,
+  buildEntityDerivePrompt,
   buildConventionsGeneratePrompt,
   buildPrototypeGeneratePrompt,
   buildFlowchartGeneratePrompt,
@@ -21,6 +22,7 @@ const REVISE_SCOPES = new Set<GlobalFeedbackScope>(["feature", "entity", "protot
 const GENERATE_SCOPES = new Set<GenerateScope>([
   "feature",
   "entity",
+  "entity-derive",
   "conventions",
   "prototype",
   "flowchart"
@@ -63,6 +65,7 @@ promptsRouter.get("/generate-prompt", async (req, res, next) => {
     let result;
     if (scope === "feature") result = await buildFeatureGeneratePrompt(productId);
     else if (scope === "entity") result = await buildEntityGeneratePrompt(productId);
+    else if (scope === "entity-derive") result = await buildEntityDerivePrompt(productId);
     else if (scope === "conventions") result = await buildConventionsGeneratePrompt(productId);
     else if (scope === "flowchart") result = await buildFlowchartGeneratePrompt(productId);
     else result = await buildPrototypeGeneratePrompt(productId);

@@ -13,6 +13,7 @@ import type { ApiEnvelope } from "../types";
 export type PromptScope =
   | "feature"
   | "entity"
+  | "entity-derive"
   | "prototype"
   | "conventions"
   | "flowchart";
@@ -44,6 +45,7 @@ interface PromptData {
 const SCOPE_TITLE: Record<PromptScope, string> = {
   feature: "功能点",
   entity: "实体",
+  "entity-derive": "Path C 派生实体",
   prototype: "原型",
   conventions: "L0 规范",
   flowchart: "流程图"

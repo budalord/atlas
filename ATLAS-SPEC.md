@@ -91,7 +91,14 @@ doc_version: v1                            # 文档版本号
 | `AI-REQUIREMENTS.md` | 演进与风险 | AI 工作流需求登记(已识别的 AI 场景表) | 架构师 |
 | `RISKS.md` | 演进与风险 | 风险登记(暴雷点 / 已知开放项 / 拟处理时机) | 架构师 |
 
-**Round 4 阶段 1 行为**:Atlas 仅识别 + 渲染原文(treat as markdown),不结构化解析。Round 4 阶段 3+ 起,部分文件升级为结构化卡片(DECISIONS / SEAMS / ENTITIES-OWNERSHIP / 等)。
+**结构化进度**(Round 4):
+- **阶段 1**:全部 7 类文件 raw markdown 渲染(在 SpecTab 子页签内)
+- **阶段 3**:DECISIONS.md(H3 块 + status)+ SEAMS.md(H2 章节)→ 结构化卡片;见 [docs/decisions-contract.md](docs/decisions-contract.md) / [docs/seams-contract.md](docs/seams-contract.md)
+- **阶段 4**:ENTITIES-OWNERSHIP.md → 表格交互式编辑;见 [docs/entities-ownership-contract.md](docs/entities-ownership-contract.md)
+- **阶段 6**:ARCHITECTURAL-WARNINGS.md → H2 块 + status 切换;见 [docs/warnings-contract.md](docs/warnings-contract.md)
+- **EVOLUTION-PRINCIPLES.md / AI-REQUIREMENTS.md / RISKS.md**:保留 raw markdown 形态(快照本身是表 + 散文混合,强行结构化会破坏 — 见各 contract 关联讨论)
+
+**L0 违规机械化检测**(阶段 6 新增):Atlas 自动检 features 是否违反命名约定 / RolesRegistry 引用 / module_group 引用 / ownership 合法值;违规列表在 L0 规范 tab 底部展示。语义级违规(描述写作风格 / 禁忌段)留派生 Agent prompt 检(后续轮次)。
 
 **写盘约定**:文件由 Agent 写为主,UI 仅做小手术(后续阶段提供加条目表单)。文件缺失 = 空态,不阻塞产品加载。
 

@@ -127,6 +127,14 @@ export function FeatureModal({
                 </>
               ) : null}
               <span className="font-mono text-slate-400">{featureId}</span>
+              {feature?.reviewed_at ? (
+                <span
+                  className="rounded border border-emerald-300 bg-emerald-50 px-1.5 py-0.5 text-emerald-800"
+                  title={`审阅日期: ${feature.reviewed_at}${feature.reviewed_by ? " · " + feature.reviewed_by : ""}`}
+                >
+                  ✅ 已审
+                </span>
+              ) : null}
               {feature?.needs_revision ? (
                 <span className="rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-amber-800">
                   ⚠ 待 Agent 重做
@@ -157,10 +165,28 @@ export function FeatureModal({
             </div>
           ) : feature ? (
             <div className="space-y-4">
-              <section className="rounded-md border border-slate-200 bg-white">
-                <header className="border-b border-slate-200 px-4 py-2 text-sm font-semibold text-slate-900">
-                  描述
+              {/* 给决策者(置顶 · 默认展开) — 决策者视角,白话 */}
+              <section className="rounded-md border-2 border-emerald-300 bg-emerald-50/40">
+                <header className="flex items-center justify-between border-b border-emerald-200 px-4 py-2 text-sm font-semibold text-emerald-900">
+                  <span>给决策者</span>
+                  <span className="text-[10px] font-normal text-emerald-700">决策者视角 · 业务决策方主要看这块</span>
                 </header>
+                <div className="px-4 py-3">
+                  {feature.decision_maker_view.trim() ? (
+                    <MarkdownRenderer markdown={feature.decision_maker_view} />
+                  ) : (
+                    <div className="rounded border border-dashed border-slate-300 bg-white px-3 py-2 text-[12px] italic text-slate-500">
+                      该功能点尚未填写"给决策者"内容。展开下方"技术描述"看原始内容,或在反馈池投反馈让 Agent 补全。
+                    </div>
+                  )}
+                </div>
+              </section>
+
+              {/* 技术描述(默认折叠) — 给 Agent / 工程师精确语境的原文 */}
+              <details className="rounded-md border border-slate-200 bg-white">
+                <summary className="cursor-pointer border-b border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700">
+                  技术描述 <span className="text-[11px] font-normal text-slate-400">(Agent / 工程师视角)</span>
+                </summary>
                 <div className="px-4 py-3">
                   {feature.description.trim() ? (
                     <MarkdownRenderer markdown={feature.description} />
@@ -168,7 +194,7 @@ export function FeatureModal({
                     <div className="text-xs italic text-slate-400">(暂无描述)</div>
                   )}
                 </div>
-              </section>
+              </details>
 
               {/* 中形态: 关联实体 + 归属 */}
               {(feature.entities_touched && feature.entities_touched.length > 0) ||
