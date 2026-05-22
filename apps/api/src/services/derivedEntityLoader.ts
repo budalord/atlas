@@ -1,10 +1,13 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
+import YAML from "yaml";
 import type {
   DerivedEntitiesData,
   DerivedEntity,
   DerivedEntityQuestionsData,
   EntityQuestion,
+  EntityQuestionStatus,
   EntityReconcileDiff,
   EntityReconcileReport
 } from "@atlas/shared";
@@ -14,6 +17,7 @@ import {
   listMarkdownFiles
 } from "./fileReader";
 import { parseMarkdownWithFrontmatter, parseYaml } from "./markdownParser";
+import { parseGlobalFeedbackFile } from "./globalFeedbackParser";
 
 interface DerivedEntityFrontmatter {
   name?: string;
@@ -55,6 +59,7 @@ export async function loadDerivedEntities(productId: string): Promise<DerivedEnt
 export function parseDerivedEntity(idFromFile: string, source: string): DerivedEntity {
   const parsed = parseMarkdownWithFrontmatter<DerivedEntityFrontmatter>(source, {});
   const fm = parsed.frontmatter;
+  const body = parsed.body.trim();
   return {
     name: fm.name?.trim() || idFromFile,
     layer: fm.layer?.trim() || "[TBD]",
@@ -63,8 +68,26 @@ export function parseDerivedEntity(idFromFile: string, source: string): DerivedE
     sourceSeams: stringArray(fm.sourceSeams),
     sourceDecisions: stringArray(fm.sourceDecisions),
     generated_at: fm.generated_at?.trim() || null,
-    body: parsed.body.trim()
+    body,
+    decisionMakerView: extractDecisionMakerView(body),
+    reviewedAt: null,
+    reviewedBy: null,
+    reviewerNote: null
   };
+}
+
+/**
+ * 从派生实体 body 中抽取 `## 给决策者` H2 段内容(契约 §3.3)。
+ * 取该 H2 之下、下一个 H2 之前(或文末)的文本, 去掉 HTML 注释(Agent note trail), 去 trim 空行。
+ * 段不存在或为空 → 返回空字符串。
+ */
+export function extractDecisionMakerView(body: string): string {
+  const m = body.match(/^##\s+给决策者\s*$([\s\S]*?)(?=^##\s+|\s*$(?![\s\S]))/m);
+  if (!m) return "";
+  const raw = m[1] ?? "";
+  // 去 HTML 注释(Agent note trail)
+  const noComments = raw.replace(/<!--[\s\S]*?-->/g, "");
+  return noComments.trim();
 }
 
 function stringArray(v: unknown): string[] {
@@ -160,11 +183,33 @@ export async function computeDerivedEntitiesStale(productId: string): Promise<{
 }
 
 /**
- * 加载派生整体数据(实体清单 + stale 状态)。
+ * 加载派生整体数据(实体清单 + stale 状态 + sidecar 审阅状态)。
+ *
+ * 副作用: 惰性清理 review-state.yml 中对应实体已不在派生集的条目。
  */
 export async function loadDerivedEntitiesData(productId: string): Promise<DerivedEntitiesData> {
   const entities = await loadDerivedEntities(productId);
   const { stale, stale_reason, derivedNewestMtime } = await computeDerivedEntitiesStale(productId);
+
+  // 读 sidecar review-state.yml, merge 进 entities
+  let reviewState = await loadReviewState(productId);
+  const validNames = new Set(entities.map((e) => e.name));
+  const filtered = reviewState.filter((r) => validNames.has(r.entity));
+  if (filtered.length !== reviewState.length) {
+    // 派生集变了, 清理 stale 审阅条目
+    await writeReviewState(productId, filtered);
+    reviewState = filtered;
+  }
+  const byName = new Map(reviewState.map((r) => [r.entity, r]));
+  for (const ent of entities) {
+    const r = byName.get(ent.name);
+    if (r) {
+      ent.reviewedAt = r.reviewed_at;
+      ent.reviewedBy = r.reviewed_by;
+      ent.reviewerNote = r.note ?? null;
+    }
+  }
+
   return {
     exists: entities.length > 0,
     entities,
@@ -172,6 +217,155 @@ export async function loadDerivedEntitiesData(productId: string): Promise<Derive
     stale,
     stale_reason
   };
+}
+
+/* ============================================================
+ *  sidecar review-state.yml · 决策者审阅元数据
+ * ============================================================ */
+
+export interface ReviewStateEntry {
+  entity: string;
+  reviewed_at: string;
+  reviewed_by: string;
+  note?: string | null;
+}
+
+function reviewStatePath(productId: string): string {
+  return dataPath("products", productId, "derived", "entities", "review-state.yml");
+}
+
+export async function loadReviewState(productId: string): Promise<ReviewStateEntry[]> {
+  try {
+    const raw = await fs.readFile(reviewStatePath(productId), "utf8");
+    const parsed = YAML.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const out: ReviewStateEntry[] = [];
+    for (const item of parsed) {
+      if (!item || typeof item !== "object") continue;
+      const r = item as Record<string, unknown>;
+      const entity = typeof r.entity === "string" ? r.entity.trim() : "";
+      const reviewed_at = typeof r.reviewed_at === "string" ? r.reviewed_at.trim() : "";
+      const reviewed_by = typeof r.reviewed_by === "string" ? r.reviewed_by.trim() : "";
+      const note = typeof r.note === "string" ? r.note : null;
+      if (!entity || !reviewed_at) continue;
+      out.push({ entity, reviewed_at, reviewed_by: reviewed_by || "unknown", note });
+    }
+    return out;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
+    return [];
+  }
+}
+
+export async function writeReviewState(productId: string, entries: ReviewStateEntry[]): Promise<void> {
+  const filePath = reviewStatePath(productId);
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const clean = entries.map((e) => ({
+    entity: e.entity,
+    reviewed_at: e.reviewed_at,
+    reviewed_by: e.reviewed_by,
+    note: e.note ?? ""
+  }));
+  const text = clean.length === 0 ? "[]\n" : YAML.stringify(clean);
+  await fs.writeFile(filePath, text, "utf8");
+}
+
+/**
+ * 标/取消 单实体已审。action=mark 时若 entity 不在派生集 → throw。
+ */
+export async function patchEntityReview(
+  productId: string,
+  entityName: string,
+  action: "mark" | "unmark",
+  reviewer: string,
+  note: string
+): Promise<ReviewStateEntry | null> {
+  const entities = await loadDerivedEntities(productId);
+  const inSet = entities.some((e) => e.name === entityName);
+  if (action === "mark" && !inSet) {
+    throw new Error(`实体 ${entityName} 不在派生集`);
+  }
+  const state = await loadReviewState(productId);
+  const idx = state.findIndex((e) => e.entity === entityName);
+  if (action === "unmark") {
+    if (idx >= 0) {
+      state.splice(idx, 1);
+      await writeReviewState(productId, state);
+    }
+    return null;
+  }
+  const entry: ReviewStateEntry = {
+    entity: entityName,
+    reviewed_at: new Date().toISOString(),
+    reviewed_by: reviewer || "unknown",
+    note: note || null
+  };
+  if (idx >= 0) state[idx] = entry;
+  else state.push(entry);
+  await writeReviewState(productId, state);
+  return entry;
+}
+
+/* ============================================================
+ *  sidecar questions-decisions.yml · question 决策(reject 落地处)
+ * ============================================================ */
+
+export interface QuestionDecisionEntry {
+  question_hash: string;
+  status: "rejected";
+  decided_at: string;
+  reason: string;
+}
+
+function questionDecisionsPath(productId: string): string {
+  return dataPath("products", productId, "derived", "entities", "questions-decisions.yml");
+}
+
+/** 用 question 文本计算稳定 hash, 跨派生轮次能对上同一 question。 */
+export function questionHash(question: string): string {
+  return createHash("sha1").update(question.trim()).digest("hex");
+}
+
+export async function loadQuestionDecisions(productId: string): Promise<QuestionDecisionEntry[]> {
+  try {
+    const raw = await fs.readFile(questionDecisionsPath(productId), "utf8");
+    const parsed = YAML.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const out: QuestionDecisionEntry[] = [];
+    for (const item of parsed) {
+      if (!item || typeof item !== "object") continue;
+      const r = item as Record<string, unknown>;
+      const h = typeof r.question_hash === "string" ? r.question_hash.trim() : "";
+      const s = r.status === "rejected" ? "rejected" as const : null;
+      const decided_at = typeof r.decided_at === "string" ? r.decided_at.trim() : "";
+      const reason = typeof r.reason === "string" ? r.reason : "";
+      if (!h || !s || !decided_at) continue;
+      out.push({ question_hash: h, status: s, decided_at, reason });
+    }
+    return out;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
+    return [];
+  }
+}
+
+export async function appendQuestionDecision(
+  productId: string,
+  entry: QuestionDecisionEntry
+): Promise<void> {
+  const filePath = questionDecisionsPath(productId);
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const state = await loadQuestionDecisions(productId);
+  const idx = state.findIndex((e) => e.question_hash === entry.question_hash);
+  if (idx >= 0) state[idx] = entry;
+  else state.push(entry);
+  const clean = state.map((e) => ({
+    question_hash: e.question_hash,
+    status: e.status,
+    decided_at: e.decided_at,
+    reason: e.reason
+  }));
+  await fs.writeFile(filePath, YAML.stringify(clean), "utf8");
 }
 
 async function safeMtimeMs(absPath: string): Promise<number | null> {
@@ -321,6 +515,9 @@ export async function loadEntityQuestions(productId: string): Promise<DerivedEnt
     else errors.push(out.error);
   });
 
+  // 富集 status: 跨 GLOBAL-FEEDBACK(accept/custom) + questions-decisions.yml(reject) 合并判定
+  await enrichQuestionStatus(productId, questions);
+
   // trigger lint(同 flowchart §6.3.4):trigger.original_text 必须在 feature_path 中字面命中
   const lintErrors = await lintTriggers(productId, questions);
   const all = [...errors, ...lintErrors];
@@ -331,6 +528,45 @@ export async function loadEntityQuestions(productId: string): Promise<DerivedEnt
     questions_lint_ok: all.length === 0,
     questions_lint_errors: all
   };
+}
+
+/**
+ * 给每个 question 计算 status / resolution / resolvedGfbId(契约 §5.2)。
+ * - questions-decisions.yml 中 question_hash 匹配 → status=rejected
+ * - GLOBAL-FEEDBACK entity 段 content 含 `[question-hash:<hash>]` 标记 → status=accepted/custom(从标记解析)
+ * - 其他 → status=pending
+ */
+async function enrichQuestionStatus(productId: string, questions: EntityQuestion[]): Promise<void> {
+  const decisions = await loadQuestionDecisions(productId);
+  const decisionsByHash = new Map(decisions.map((d) => [d.question_hash, d]));
+  const globalFeedback = await parseGlobalFeedbackFile(productId);
+  // 在 entity 段 content 中找 [question-hash:<hash>] [action:<accept|custom>] 标记
+  // 写入约定(spec.ts decide 端点): content 起首加 `[question-hash:<hash>] [action:<a>] ` 前缀
+  const acceptedByHash = new Map<string, { action: "accepted" | "custom"; id: string; content: string }>();
+  for (const gfb of globalFeedback.entity) {
+    const m = gfb.content.match(/^\[question-hash:([0-9a-f]{40})\]\s*\[action:(accept|custom)\]\s*([\s\S]*)$/);
+    if (!m) continue;
+    const action = m[2] === "accept" ? "accepted" : "custom";
+    acceptedByHash.set(m[1], { action, id: gfb.id, content: m[3].trim() });
+  }
+
+  for (const q of questions) {
+    const h = questionHash(q.question);
+    const rejected = decisionsByHash.get(h);
+    if (rejected) {
+      q.status = "rejected";
+      q.resolution = rejected.reason;
+      continue;
+    }
+    const accepted = acceptedByHash.get(h);
+    if (accepted) {
+      q.status = accepted.action;
+      q.resolution = accepted.content;
+      q.resolvedGfbId = accepted.id;
+      continue;
+    }
+    q.status = "pending";
+  }
 }
 
 function extractYamlBlock(content: string): string {
@@ -356,7 +592,8 @@ function normalizeQuestion(item: unknown, idx: number): EntityQuestion | { error
     feature,
     module: mod,
     question,
-    trigger: { feature_path: fp, original_text: ot }
+    trigger: { feature_path: fp, original_text: ot },
+    status: "pending"
   };
   if (proposed !== undefined) out.proposed_resolution = proposed;
   return out;

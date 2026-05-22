@@ -745,6 +745,14 @@ export interface DerivedEntity {
   generated_at: string | null;
   /** 完整 markdown body(供 UI 展开看字段表 / 状态机 / 等) */
   body: string;
+  /** `## 给决策者` H2 段抽出的白话内容(契约 §3.3),无该段则为空字符串 */
+  decisionMakerView: string;
+  /** 决策者标已审时间(ISO),来自 sidecar review-state.yml;未审为 null */
+  reviewedAt: string | null;
+  /** 决策者标已审人,来自 sidecar review-state.yml;未审为 null */
+  reviewedBy: string | null;
+  /** 审阅备注(可选),来自 sidecar review-state.yml */
+  reviewerNote: string | null;
 }
 
 /**
@@ -780,6 +788,8 @@ export interface EntityReconcileReport {
 /**
  * 派生实体 question(`derived/entities/questions.md`),trigger 模式与 flowchart-contract §6.3 一致。
  */
+export type EntityQuestionStatus = "pending" | "accepted" | "custom" | "rejected";
+
 export interface EntityQuestion {
   feature: string;
   module: string;
@@ -789,6 +799,12 @@ export interface EntityQuestion {
     original_text: string;
   };
   proposed_resolution?: string;
+  /** 决策状态(契约 §5.2),跨 GLOBAL-FEEDBACK(accept/custom)与 questions-decisions.yml(reject)合并判定 */
+  status: EntityQuestionStatus;
+  /** accept → proposed_resolution; custom → 用户填的内容; reject → 驳回原因; pending → undefined */
+  resolution?: string;
+  /** 决策落地 gfb id(accept/custom 时) */
+  resolvedGfbId?: string;
 }
 
 /**

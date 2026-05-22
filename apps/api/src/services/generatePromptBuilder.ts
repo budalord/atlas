@@ -5,6 +5,7 @@ import { DATA_ROOT, dataPath, readTextFile } from "./fileReader";
 import { normalizeProductMeta, parseYaml } from "./markdownParser";
 import { loadEntities, loadModules, loadFeatures } from "./entityLoader";
 import { loadRolesRegistry } from "./rolesRegistry";
+import { parseGlobalFeedbackFile } from "./globalFeedbackParser";
 
 export interface FeatureGenerateStats {
   has_description: boolean;
@@ -656,6 +657,25 @@ ${statesLine}`
   const seamsText = (await readTextFile("products", productId, "SEAMS.md")) ?? "(无 SEAMS.md)";
   const decisionsText = (await readTextFile("products", productId, "DECISIONS.md")) ?? "(无 DECISIONS.md)";
   const ownershipText = (await readTextFile("products", productId, "ENTITIES-OWNERSHIP.md")) ?? "(无 ENTITIES-OWNERSHIP.md)";
+
+  // 第 5 类输入 — 决策者已拍板的 question 决策(对偶 entity-contract §2.5)
+  // 全局需求池 entity 段: accept/custom 决策落地
+  // sidecar questions-decisions.yml: reject 决策落地
+  const globalFeedback = await parseGlobalFeedbackFile(productId);
+  const entityFeedback = globalFeedback.entity;
+  const entityFeedbackText = entityFeedback.length === 0
+    ? "(无 — 决策者尚未对实体相关 question 做过决策)"
+    : entityFeedback
+        .map((g) => `- **${g.id}** (${g.date}): ${g.content}`)
+        .join("\n");
+
+  const questionsDecisionsText = (await readTextFile(
+    "products",
+    productId,
+    "derived",
+    "entities",
+    "questions-decisions.yml"
+  )) ?? "(无 questions-decisions.yml — 决策者尚未驳回过任何 question)";
   // 流程图 main.mmd 含已经规范化的 Entity 名,实体派生 Agent 必须与其严格一致。
   // 文件不存在 → 没有流程图作锚点,派生 Agent 自己挑名字,但要在派生计划中说明。
   const flowchartMmdText = (await readTextFile("products", productId, "derived", "flowcharts", "main.mmd")) ?? "(无 main.mmd — 该产品流程图尚未生成,实体命名请按 flowchart-contract §3.4 / §3.4.2 自行规范并在派生计划中说明映射表)";
@@ -673,8 +693,8 @@ ${statesLine}`
   const parts = [
     header(meta, productId, "Path C 实体派生"),
     `## 你的任务
-你是 Atlas 的 Path C **实体派生 Agent**。基于产品的 4 类 source 输入(features × N / SEAMS / DECISIONS /
-ENTITIES-OWNERSHIP),产出 derived 实体清单 + reconcile 报告 + questions。
+你是 Atlas 的 Path C **实体派生 Agent**。基于产品的 5 类 source 输入(features × N / SEAMS / DECISIONS /
+ENTITIES-OWNERSHIP / GLOBAL-FEEDBACK[entity 段] + questions-decisions.yml),产出 derived 实体清单 + reconcile 报告 + questions。
 
 输出文件(全部写到 \`${outputDir}\`):
 1. \`<EntityName>.md\` — 每实体一个文件(见下方契约 §3)
@@ -684,14 +704,27 @@ ENTITIES-OWNERSHIP),产出 derived 实体清单 + reconcile 报告 + questions�
 工作流要求:
 1. 先输出**派生计划**:
    - 列你打算派生的所有实体 + 它们的命名映射表(见 flowchart-contract §3.4 / §3.4.1 / §3.4.2)
-   - 列你打算抛多少 question?对应哪些 source?
+   - 列你打算抛多少 question?对应哪些 source?(若有 GLOBAL-FEEDBACK entity 决策已覆盖,**不要再抛**)
    - 列预期 reconcile 差异:派生有声明无 N1 / 声明有派生无 N2 / 归属不一致 N3
 2. **等用户确认后**再用 Edit/Write 工具实际写文件
-3. 严格遵守契约。**派生只读 — 不要回写 features/SEAMS/DECISIONS/ENTITIES-OWNERSHIP**
+3. 严格遵守契约。**派生只读 — 不要回写 features/SEAMS/DECISIONS/ENTITIES-OWNERSHIP/GLOBAL-FEEDBACK**
 4. 缺数据 → 标 \`[TBD]\` + 写 questions.md ticket;**不要"业务常识"补**
 5. 命名规范以 flowchart-contract §3.4 / §3.4.1 / §3.4.2 为准 — 优先与 derived/flowcharts/main.mmd 中的 Entity 名一致(若该文件存在)
 6. 每个 entity md 必须含 frontmatter \`name / layer / maintainers / sourceFeatures[] / generated_at\`(其余字段可选)
-7. 当前生成时间(写入 generated_at): ${today}
+7. **每个 entity md body 必须含 \`## 给决策者\` H2 段**(见契约 §3.3) — 1-3 句白话,综合 features + ENTITIES-OWNERSHIP + DECISIONS 描述"这是什么 / 谁维护 / 关键约束"。不写技术黑话(不写 PK/FK/索引), 决策者审阅视角。
+8. 当前生成时间(写入 generated_at): ${today}
+
+## ⚠ 消化决策者已拍板的决策(对偶 entity-contract §2.5)
+
+下方 "全局需求池(entity 段)" + "questions-decisions.yml" 是决策者上一轮对 questions.md 的决策结果:
+
+- **GLOBAL-FEEDBACK entity 段每条** = 决策者 accept agent 建议 或 custom 自填的决策。**视为已解决的 question**:
+  - 必须把决策合入对应实体规格(字段必填性 / 关系建模 / 状态机分支 / 归属层 等)
+  - 在被影响的实体 .md 的相关位置留 \`<!-- Agent note: 来自全局需求池 gfb-YYYYMMDD-xxxxxx -->\` 注释 trail
+  - **本轮 questions.md 不要再以同样形式抛出该问题**
+- **questions-decisions.yml 中 status: rejected 的条目** = 决策者认为不是业务问题(agent 抛错了):
+  - 同样的 question 本轮**不要再抛**
+  - 该问题如果还需要处理, 自决(纯工程决策)或在 entity .md 加 Agent note 留 trail
 
 ## ⚠ 抛 question 前必读(同 flowchart-contract §6.3.5)
 
@@ -740,6 +773,14 @@ ${rolesList}`,
     "### ENTITIES-OWNERSHIP.md(实体归属 ground truth)",
     ownershipText,
     "",
+    "### GLOBAL-FEEDBACK.md · ## 实体需求(决策者已 accept/custom 的决策 — 视为已解决 question)",
+    entityFeedbackText,
+    "",
+    "### derived/entities/questions-decisions.yml(决策者已 reject 的 question — 本轮不要再抛)",
+    "```yaml",
+    questionsDecisionsText,
+    "```",
+    "",
     "### derived/flowcharts/main.mmd(已生成的流程图 — 实体命名锚点)",
     "派生实体的 name 必须与本文件中出现的 Entity 名严格一致(同 entity 不可起新名,不同 entity 不可合并)。",
     "```mermaid",
@@ -770,7 +811,7 @@ ${rolesList}`,
     "",
     FOOTER(
       productId,
-      "- 派生只读,**不要回写** features/SEAMS/DECISIONS/ENTITIES-OWNERSHIP\n- 缺数据宁可标 [TBD] + 走 questions.md,不要凭'业务常识'补\n- 命名规范优先匹配 derived/flowcharts/main.mmd 中已有的 Entity 名"
+      "- 派生只读,**不要回写** features/SEAMS/DECISIONS/ENTITIES-OWNERSHIP/GLOBAL-FEEDBACK\n- 不要碰 sidecar(review-state.yml / questions-decisions.yml)— 那是 UI 写的审阅元数据\n- 缺数据宁可标 [TBD] + 走 questions.md,不要凭'业务常识'补\n- 命名规范优先匹配 derived/flowcharts/main.mmd 中已有的 Entity 名\n- 每个实体 .md **必须含 `## 给决策者` H2 段**(1-3 句白话,业务化, 不写技术黑话)\n- 全局需求池 entity 段每条决策必须合入相关实体规格 + 留 `<!-- Agent note: 来自全局需求池 gfb-xxx -->` trail"
     )
   ];
 

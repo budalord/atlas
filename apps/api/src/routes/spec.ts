@@ -28,10 +28,14 @@ import {
   renderEntitiesOwnership
 } from "../services/entitiesOwnershipParser";
 import {
+  appendQuestionDecision,
   loadDerivedEntitiesData,
   loadEntityQuestions,
-  loadEntityReconcileReport
+  loadEntityReconcileReport,
+  patchEntityReview,
+  questionHash
 } from "../services/derivedEntityLoader";
+import { appendGlobalFeedback } from "../services/globalFeedbackWriter";
 import { runL0Lint } from "../services/l0Linter";
 import { parseSeamsMarkdown } from "../services/seamParser";
 import {
@@ -554,6 +558,131 @@ productSpecRouter.get("/derived-entities/questions", async (req, res, next) => {
     }
     const data = await loadEntityQuestions(productId);
     res.json({ data, version: getDataVersion() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PATCH /derived-entities/:name/review
+ *   → 标 / 取消已审。写 sidecar review-state.yml(契约 §3.6)。
+ *   body: { action: "mark" | "unmark", reviewer?: string, note?: string }
+ */
+productSpecRouter.patch("/derived-entities/:name/review", async (req, res, next) => {
+  const productId = (req.params as { id?: string }).id;
+  const entityName = (req.params as { name?: string }).name;
+  if (!productId || !entityName) {
+    res.status(400).json({ error: "missing product id or entity name" });
+    return;
+  }
+  try {
+    if (!(await productExists(productId))) {
+      res.status(404).json({ error: `product not found: ${productId}` });
+      return;
+    }
+    const body = (req.body ?? {}) as {
+      action?: unknown;
+      reviewer?: unknown;
+      note?: unknown;
+    };
+    const action = body.action === "mark" || body.action === "unmark" ? body.action : null;
+    if (!action) {
+      res.status(400).json({ error: "action must be 'mark' or 'unmark'" });
+      return;
+    }
+    const reviewer = typeof body.reviewer === "string" ? body.reviewer : "unknown";
+    const note = typeof body.note === "string" ? body.note : "";
+    try {
+      const entry = await patchEntityReview(productId, entityName, action, reviewer, note);
+      bumpDataVersion(`products/${productId}/derived/entities/review-state.yml`);
+      res.json({ data: entry, version: getDataVersion() });
+    } catch (e) {
+      res.status(400).json({ error: e instanceof Error ? e.message : "review patch failed" });
+    }
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /derived-entities/questions/:idx/decide
+ *   → 对 question 做决策(契约 §5.2)。
+ *   body: { action: "accept" | "custom" | "reject", customContent?: string, reason?: string }
+ *   accept/custom → 写 GLOBAL-FEEDBACK entity 段
+ *   reject       → 写 derived/entities/questions-decisions.yml
+ */
+productSpecRouter.post("/derived-entities/questions/:idx/decide", async (req, res, next) => {
+  const productId = (req.params as { id?: string }).id;
+  const idxRaw = (req.params as { idx?: string }).idx;
+  if (!productId || idxRaw === undefined) {
+    res.status(400).json({ error: "missing product id or question idx" });
+    return;
+  }
+  const idx = Number.parseInt(idxRaw, 10);
+  if (!Number.isInteger(idx) || idx < 0) {
+    res.status(400).json({ error: "idx must be non-negative integer" });
+    return;
+  }
+  try {
+    if (!(await productExists(productId))) {
+      res.status(404).json({ error: `product not found: ${productId}` });
+      return;
+    }
+    const body = (req.body ?? {}) as {
+      action?: unknown;
+      customContent?: unknown;
+      reason?: unknown;
+    };
+    const action = body.action;
+    if (action !== "accept" && action !== "custom" && action !== "reject") {
+      res.status(400).json({ error: "action must be 'accept' | 'custom' | 'reject'" });
+      return;
+    }
+    const data = await loadEntityQuestions(productId);
+    if (!data.exists || idx >= data.questions.length) {
+      res.status(404).json({ error: `question idx ${idx} not found` });
+      return;
+    }
+    const q = data.questions[idx];
+    const h = questionHash(q.question);
+
+    if (action === "reject") {
+      const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+      await appendQuestionDecision(productId, {
+        question_hash: h,
+        status: "rejected",
+        decided_at: new Date().toISOString(),
+        reason: reason || "(无原因说明)"
+      });
+      bumpDataVersion(`products/${productId}/derived/entities/questions-decisions.yml`);
+      res.json({ data: { status: "rejected" }, version: getDataVersion() });
+      return;
+    }
+
+    // accept / custom → 写 GLOBAL-FEEDBACK entity 段
+    let resolution: string;
+    if (action === "accept") {
+      resolution = (q.proposed_resolution ?? "").trim();
+      if (!resolution) {
+        res.status(400).json({ error: "question has no proposed_resolution to accept" });
+        return;
+      }
+    } else {
+      const custom = typeof body.customContent === "string" ? body.customContent.trim() : "";
+      if (!custom) {
+        res.status(400).json({ error: "customContent required for action=custom" });
+        return;
+      }
+      resolution = custom;
+    }
+    // content 加 hash + action 标记前缀, 派生 agent 通过该前缀识别"这条 gfb 来自 question 决策"
+    const content = `[question-hash:${h}] [action:${action}] 原 question: ${q.question}\n决策: ${resolution}`;
+    const entry = await appendGlobalFeedback(productId, "entity", content);
+    bumpDataVersion(`products/${productId}/GLOBAL-FEEDBACK.md`);
+    res.json({
+      data: { status: action === "accept" ? "accepted" : "custom", gfbId: entry.id, resolution },
+      version: getDataVersion()
+    });
   } catch (error) {
     next(error);
   }
