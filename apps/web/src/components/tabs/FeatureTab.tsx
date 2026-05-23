@@ -137,6 +137,7 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
   useEffect(() => {
     setData(null);
     setOpenFeature(null);
+    foldStateRef.current.clear();
     void loadList();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productId]);
@@ -210,7 +211,8 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
         {
           autoFit: true,
           duration: 300,
-          initialExpandLevel: 2,
+          // 我们自己在 applyFoldState 里管折叠默认值, markmap 端不插手
+          initialExpandLevel: -1,
           pan: false,
           paddingX: 8,
           spacingHorizontal: 80,
@@ -769,17 +771,30 @@ function buildFeatureNode(
 }
 
 /**
- * 递归把 foldStateMap 中存的折叠状态 patch 到 IPureNode tree 的 payload.fold 上,
- * 让 markmap setData 时能恢复用户的折叠/展开偏好。
+ * 递归把 foldStateMap 中存的折叠状态 patch 到 IPureNode tree 的 payload.fold 上。
+ * 用户明确改过的节点 → 按 foldMap 走;
+ * 用户没改过的节点 → 按 defaultExpandLevel 决定(深度 > N 默认折叠)。
+ * 这样 markmap 端可以传 initialExpandLevel: -1 让它完全不插手, 折叠状态由我们单源管理。
  */
-function applyFoldState(node: IPureNode, foldMap: Map<string, boolean>): IPureNode {
+const DEFAULT_EXPAND_LEVEL = 2;
+function applyFoldState(
+  node: IPureNode,
+  foldMap: Map<string, boolean>,
+  depth = 1,
+  defaultExpandLevel = DEFAULT_EXPAND_LEVEL
+): IPureNode {
   const key = (node.payload as { nodeKey?: string } | undefined)?.nodeKey;
-  const folded = key ? foldMap.get(key) : undefined;
-  if (folded !== undefined) {
-    node.payload = { ...node.payload, fold: folded ? 1 : 0 };
+  const userFolded = key ? foldMap.get(key) : undefined;
+  if (userFolded !== undefined) {
+    node.payload = { ...node.payload, fold: userFolded ? 1 : 0 };
+  } else if (depth >= defaultExpandLevel) {
+    // 跟 markmap-view _initializeData 原始语义一致: depth >= initialExpandLevel 默认折叠
+    node.payload = { ...node.payload, fold: 1 };
   }
   if (node.children) {
-    node.children = node.children.map((c) => applyFoldState(c, foldMap));
+    node.children = node.children.map((c) =>
+      applyFoldState(c, foldMap, depth + 1, defaultExpandLevel)
+    );
   }
   return node;
 }
