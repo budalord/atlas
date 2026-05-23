@@ -30,17 +30,19 @@ function isBookkeepingQuestion(q: EntityQuestion): boolean {
   return q.feature === "(cross)" || q.module === "(cross)";
 }
 
-// 实体需要决策者亲自审的判定 — 信号是 agent 自己在 `**待你拍**` 段留下了真实勾选项
-// (features 已经决过的流程/权限/约束, agent 应该自决, 不该塞回实体)
-function countPendingTodos(view: string): number {
-  return (view.match(/^\s*-\s*\[\s*\]/gm) ?? []).length;
+// 移除老数据里的 `## 给决策者` H2 段(rev3 后实体卡只展示 schema, 决策走顶部 question)
+// 老数据被本函数 client-side 隐藏; 下次 entity-derive 跑过后, agent 直接不写这段
+function stripDecisionMakerView(body: string): string {
+  return body.replace(/^##\s+给决策者[\s\S]*?(?=^##\s+|\s*$(?![\s\S]))/m, "").trim();
 }
 
+// 实体需要决策者亲自审的判定 — 只看 schema 本身的 TBD 残缺
+// 业务决策不在这里判定: 该走顶部 question, 不该让实体卡变成决策入口
 function needsHumanReview(e: DerivedEntity): boolean {
   if (e.layer === "[TBD]" || e.layer.includes("[TBD]")) return true;
   if (e.maintainers === "[TBD]" || e.maintainers.includes("[TBD]")) return true;
-  if (!e.decisionMakerView) return true;
-  if (countPendingTodos(e.decisionMakerView) > 0) return true;
+  // 字段表里有 [TBD] 标记 = agent 派生时缺数据, 走 question 之前先 flag 出来让你知道
+  if (/\[TBD\]/.test(stripDecisionMakerView(e.body))) return true;
   return false;
 }
 
@@ -48,9 +50,7 @@ function whyCritical(e: DerivedEntity): string {
   const reasons: string[] = [];
   if (e.layer.includes("[TBD]")) reasons.push("归属待定");
   if (e.maintainers.includes("[TBD]")) reasons.push("维护人待定");
-  if (!e.decisionMakerView) reasons.push("缺给决策者段");
-  const todos = countPendingTodos(e.decisionMakerView);
-  if (todos > 0) reasons.push(`${todos} 项待拍`);
+  if (/\[TBD\]/.test(stripDecisionMakerView(e.body))) reasons.push("字段含 [TBD]");
   return reasons.join(" · ");
 }
 
@@ -598,12 +598,12 @@ function EntityCard({
   pendingQuestionsCount: number;
   reason?: string;
 }) {
-  const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const isNew = !entity.reviewedAt && isRecentlyDerived(entity.generated_at);
   const reviewed = Boolean(entity.reviewedAt);
+  const schemaBody = stripDecisionMakerView(entity.body);
 
   const toggleReview = async () => {
     setSubmitting(true);
@@ -684,57 +684,22 @@ function EntityCard({
         ) : null}
       </header>
 
-      {/* 决策者视角顶置色块 — 决策者审阅入口 */}
-      {entity.decisionMakerView ? (
-        <section className="border-b border-emerald-100 bg-emerald-50/40 px-4 py-3">
-          <div className="text-[10px] font-medium text-emerald-800">给决策者</div>
-          <div className="mt-1 text-[13px] leading-6 text-slate-800">
-            <MarkdownRenderer markdown={entity.decisionMakerView} />
-          </div>
-        </section>
-      ) : (
-        <section className="border-b border-amber-200 bg-amber-50/40 px-4 py-2.5 text-[11px] italic text-amber-900">
-          该实体缺 `## 给决策者` 段, 派生 agent 应在下轮重派生时补全(见契约 §3.3)。
-        </section>
-      )}
-
       {err ? (
         <div className="border-b border-rose-100 bg-rose-50 px-4 py-1.5 text-[11px] text-rose-700">
           {err}
         </div>
       ) : null}
 
-      <button
-        className="flex w-full items-center justify-between px-4 py-2 text-left text-[11px] text-slate-500 hover:bg-slate-50"
-        onClick={() => setOpen((v) => !v)}
-        type="button"
-      >
-        <span>
-          {open ? "▾ 收起" : "▸ 展开"} 完整 markdown(字段 / 状态机 / 权限 / 引用决策 / 引用接缝)
-        </span>
-        <span className="text-[10px] text-slate-400">
-          {entity.generated_at ? formatTime(entity.generated_at) : ""}
-        </span>
-      </button>
-      {open ? (
-        <div className="border-t border-slate-100 bg-slate-50 px-4 py-3">
-          <div className="prose prose-sm max-w-none">
-            <MarkdownRenderer markdown={entity.body} />
-          </div>
-          {entity.sourceFeatures.length > 0 ? (
-            <div className="mt-3 border-t border-slate-200 pt-2 text-[11px]">
-              <div className="text-slate-500">来源 features:</div>
-              <div className="mt-1 flex flex-wrap gap-1">
-                {entity.sourceFeatures.map((f) => (
-                  <code key={f} className="rounded bg-slate-200 px-1.5 py-0.5 font-mono text-[10px] text-slate-700">
-                    {f}
-                  </code>
-                ))}
-              </div>
-            </div>
-          ) : null}
+      {/* 纯 schema 视图: 字段 / 状态机 / 权限 / 引用决策 / 引用接缝 — 决策走顶部 question */}
+      <div className="px-4 py-3">
+        <div className="prose prose-sm max-w-none text-[12px]">
+          <MarkdownRenderer markdown={schemaBody} />
         </div>
-      ) : null}
+      </div>
+
+      <footer className="flex items-center justify-end border-t border-slate-100 px-4 py-1.5 text-[10px] text-slate-400">
+        {entity.generated_at ? formatTime(entity.generated_at) : ""}
+      </footer>
     </div>
   );
 }

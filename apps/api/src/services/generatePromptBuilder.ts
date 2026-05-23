@@ -566,7 +566,7 @@ ENTITIES-OWNERSHIP / GLOBAL-FEEDBACK[entity 段] + questions-decisions.yml),产�
 4. 缺数据 → 标 \`[TBD]\` + 写 questions.md ticket;**不要"业务常识"补**
 5. 命名规范以 PascalCase 同表多名规则为准 — 同一持久化边界 → 一个规范名, 不同持久化边界 → 拆开
 6. 每个 entity md 必须含 frontmatter \`name / layer / maintainers / sourceFeatures[] / generated_at\`(其余字段可选)
-7. **每个 entity md body 必须含 \`## 给决策者\` H2 段**(见契约 §3.3) — 1-3 句白话,综合 features + ENTITIES-OWNERSHIP + DECISIONS 描述"这是什么 / 谁维护 / 关键约束"。不写技术黑话(不写 PK/FK/索引), 决策者审阅视角。
+7. **entity md 是纯数据规格**(rev3 决策者反馈定型 · 见下方"§ 实体 = schema"专段) — body 结构: \`## 字段\` + (可选) \`## 状态机\` + (可选) \`## 权限\` + (可选) \`## 引用决策\` + (可选) \`## 引用接缝\`。**不要写 \`## 给决策者\` 段**, 不要写"做什么 / 取舍 / 待你拍"段, 不要写业务故事 — 那些已经在 features 的"给决策者"里, 实体不重复。
 8. 当前生成时间(写入 generated_at): ${today}
 
 ## ⚠ 多 feature 描述同一动作 → 不要派生为不同 Entity
@@ -591,33 +591,51 @@ ENTITIES-OWNERSHIP / GLOBAL-FEEDBACK[entity 段] + questions-decisions.yml),产�
   - 同样的 question 本轮**不要再抛**
   - 该问题如果还需要处理, 自决(纯工程决策)或在 entity .md 加 Agent note 留 trail
 
-## ⚠ \`**待你拍**\` 段在实体里几乎应该是空的(决策者反馈)
+## § 实体 = schema(决策者反馈定型 · rev3)
 
-决策者已经在"功能与用例"tab 看过所有 features 的 \`**待你拍**\` — features 是业务决策的主战场, 流程 / 权限 / 业务约束 / 关键取舍都在 features 里拍过了。 实体派生只是把 features 已经决定的事翻译成数据建模, **不要在实体卡里重新生成一坨"待你拍"**, 否则决策者要重复决策同一件事。
+**实体 .md 是给程序员看的 schema, 不是给决策者看的业务文档。** 决策者的视图全部在两个地方:
+1. **功能与用例 tab** — 业务流程 / 权限 / 关键取舍 / 待拍点都在 features 的 \`## 给决策者\` 段
+2. **实体 tab 顶部 questions.md** — 实体派生过程中需要业务方拍的事(架构边界 / 新建模决策 / 跨 feature 不一致 / 完全无线索) 全部走这里
 
-**实体卡 \`**待你拍**\` 段填法**:
-- **默认写"暂无"** — 90% 以上的实体应该这样
-- 仅当满足以下任一才写勾选项:
-  1. **派生时才浮现的新业务点** — features / SEAMS / DECISIONS / ENTITIES-OWNERSHIP 都没拍, 是建模时才出现的业务决策(例: 推荐人改名后历史关系字段存 id 还是 name)
-  2. **跨 feature 不一致** — 多个 feature 提到同一字段约束不同, 必须业务方仲裁
-  3. **架构边界** — 实体存在哪个系统(ERP / 飞书 / 第三方 CRM / 凡科), 业务方决策
-  4. **完全无线索** — features 没字段没描述, 你必须派生但无依据 → 走 questions.md 抛业务 question, 不留 待你拍
+**实体 .md body 只允许这些段**(按出现顺序):
+\`\`\`
+# <EntityName>
 
-**每条 \`**待你拍**\` 必须能答出**: "为什么这事在 features 里没解 / 不该在 features 里解"。 答不出 → 删掉, 去 features 找答案或自决。
+派生于:
+- features × N
+- seams × M(可选)
+- decisions × K(可选)
 
-**每实体硬上限 2 条**。 超过说明你没消化 features 或者把工程决策塞进来了, 回去重读 5 级自检。
+## 字段
+| 字段 | 类型 | 必填 | 约束 | 备注 | 来源 |
+| --- | --- | --- | --- | --- | --- |
+...
 
-**❌ 反例**(实体卡里不该出现的"待你拍"):
-- "单文件大小上限多少"(默认 50MB / 100MB 这种操作类参数, 写到字段约束默认值即可)
-- "学员 User 与 Student 实体是双向 FK 还是单向"(纯工程, 自决, 加 \`<!-- Agent note -->\` 留痕)
-- "套餐里多个产品按权益条数摊还是原价比例摊"(features/sales/order-creation 字段清单里有, 没找到说明你没读)
-- "删除附件是否所有场景都要校长批准"(features 权限段或 ENTITIES-OWNERSHIP 有, 不是新决策)
-- "状态机要不要加 cancelled 状态"(看 feature 状态转移段 / 自决)
+## 状态机(可选 — 仅有状态转移时写)
+| from | to | 触发 | 角色 | 来源 |
+...
 
-**✅ 正例**:
-- "Lead 是 ERP 自己存还是只在第三方 CRM(飞书 / 企微)存"(架构边界, agent 无法自决)
-- "教师工资记录在 ERP 内还是飞书报销中"(数据归属, 业务方拍)
-- "推荐人改名后历史关系字段保持 id 还是写历史 name"(新建模决策, features 没覆盖)
+## 权限(可选 — 跨角色字段权限或行级权限时写)
+...
+
+## 引用决策(可选)
+- D-XX: ...
+
+## 引用接缝(可选)
+- X.Y: ...
+
+## 来源 features(可选 — 已在 frontmatter.sourceFeatures, 这里写不写都行)
+\`\`\`
+
+**严禁出现的段**(出现 = 重写):
+- ❌ \`## 给决策者\`
+- ❌ "做什么 / 取舍 / 待你拍" 任何形态
+- ❌ 业务故事描述段
+- ❌ 任何"用白话讲讲这个实体是干嘛的"段落
+
+**任何需要业务方拍的事 → 走 questions.md, 不进 entity .md**。 实体卡上只显示字段、状态机、约束 — 决策者读的是顶部 question 列表。
+
+**判别金句**: 实体 .md 应该读起来像 SQL DDL 注释, 不像产品文档。
 
 ## ⚠ 抛 question 前必读(见 entity-contract §6.3.5)
 
@@ -694,7 +712,7 @@ ${rolesList}`,
     "",
     "---",
     "",
-    DECISION_MAKER_VIEW_GUIDE,
+    "注:契约 §3.3 提到的 `## 给决策者` 段在 rev3 后**已废弃**(决策者反馈定型)。 实体 .md 是纯 schema, 决策走 questions.md。 契约文档将后续 sync, 但 prompt 规则以本文为准 — 见上方 § 实体 = schema 专段。",
     "",
     "---",
     "",
@@ -708,7 +726,7 @@ ${rolesList}`,
     "",
     FOOTER(
       productId,
-      "- 派生只读,**不要回写** features/SEAMS/DECISIONS/ENTITIES-OWNERSHIP/GLOBAL-FEEDBACK\n- 不要碰 sidecar(review-state.yml / questions-decisions.yml)— 那是 UI 写的审阅元数据\n- 缺数据宁可标 [TBD] + 走 questions.md,不要凭'业务常识'补\n- 命名规范: PascalCase 同表多名规则 (entity-contract §3.4)\n- 每个实体 .md **必须含 `## 给决策者` H2 段**(1-3 句白话,业务化, 不写技术黑话)\n- 全局需求池 entity 段每条决策必须合入相关实体规格 + 留 `<!-- Agent note: 来自全局需求池 gfb-xxx -->` trail"
+      "- 派生只读,**不要回写** features/SEAMS/DECISIONS/ENTITIES-OWNERSHIP/GLOBAL-FEEDBACK\n- 不要碰 sidecar(review-state.yml / questions-decisions.yml)— 那是 UI 写的审阅元数据\n- 缺数据宁可标 [TBD] + 走 questions.md,不要凭'业务常识'补\n- 命名规范: PascalCase 同表多名规则 (entity-contract §3.4)\n- **实体 .md 是纯 schema**(rev3 决策者反馈) — 不写 ## 给决策者 段, 不写 做什么/取舍/待你拍, 决策点全部走 questions.md\n- 全局需求池 entity 段每条决策必须合入相关实体规格 + 留 `<!-- Agent note: 来自全局需求池 gfb-xxx -->` trail"
     )
   ];
 
