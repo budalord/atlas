@@ -427,6 +427,30 @@ export interface FeaturePoint {
   field_permissions?: FieldPermissionRow[];
 }
 
+/* ============================================================
+ *  Feature 重叠检测(同 module + module_group 桶内可能重复的 feature 组)
+ * ============================================================ */
+
+/**
+ * GET /api/products/:id/features/overlap-report 中的一组 — 一组互相疑似重叠的 features。
+ */
+export interface OverlapGroup {
+  /** 组 id(组内 feature_ids 排序后的 sha1 前 12 位, 跨次扫描稳定) */
+  id: string;
+  /** 组成员 */
+  features: Array<{ moduleId: string; featureId: string; name: string }>;
+  /** 信号说明(实体重合 X% / 名称相似 Y% / 名称高度相似) */
+  reasons: string[];
+  /** 标准化的 member key(sorted "module/id" join), 用于跟 sidecar overlap-ignored 对账 */
+  memberKey: string;
+}
+
+export interface OverlapReport {
+  groups: OverlapGroup[];
+  /** sidecar overlap-ignored.yml 中已驳回的组数 */
+  ignored_count: number;
+}
+
 /** 重形态 §3.3 `## 字段清单` 段一行 */
 export interface FeatureFieldRow {
   name: string;        // 字段名 (snake_case)

@@ -80,5 +80,8 @@ export type {
   WarningStatus,
   // L0 违规
   L0Violation,
-  L0ViolationsData
+  L0ViolationsData,
+  // Feature 重叠检测
+  OverlapGroup,
+  OverlapReport
 } from "@atlas/shared";

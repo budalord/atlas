@@ -8,11 +8,17 @@ import {
   loadModules
 } from "../services/entityLoader";
 import { dataPath, readTextFile } from "../services/fileReader";
-import { getDataVersion } from "../services/watcher";
+import { bumpDataVersion, getDataVersion } from "../services/watcher";
 import { parseFeatureMarkdown } from "../services/featureParser";
 import { normalizeProductMeta, parseYaml } from "../services/markdownParser";
 import { findInvalidRoleIds } from "../services/rolesRegistry";
 import { enqueueRefine, readDraft } from "../services/taskQueue";
+import {
+  appendOverlapIgnored,
+  buildFeatureOverlapReport,
+  buildOverlapFeedbackContent
+} from "../services/featureOverlapDetector";
+import { appendGlobalFeedback } from "../services/globalFeedbackWriter";
 
 const FID_RE = /^[a-z][a-z0-9-]*$/;
 
@@ -177,6 +183,80 @@ featuresRouter.patch("/:fid/review", async (req: FeatureReq, res, next) => {
 
     const updated = parseFeatureMarkdown(req.params.fid, next$);
     res.json({ data: updated, version: getDataVersion() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/products/:id/features/overlap-report
+ *   → feature 重叠检测报告(同 module + module_group 桶内可能重复的组)。
+ *   ⚠ 路由顺序: 必须放在 `/:fid` 之前, 否则会被路径匹配吞掉。
+ */
+featuresRouter.get("/overlap-report", async (req: Request<{ id: string }>, res, next) => {
+  try {
+    const data = await buildFeatureOverlapReport(req.params.id);
+    res.json({ data, version: getDataVersion() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/products/:id/features/overlap-act
+ *   → 对一组疑似重叠 features 做决策。
+ *   body: { action: "to-agent" | "ignore", feature_ids: string[], reasons?: string[], names?: string[], reason?: string }
+ *   - to-agent: 写入全局需求池 feature 段, 让 revise agent 下轮处理
+ *   - ignore: 写 sidecar overlap-ignored.yml, 下次扫描不再提示
+ */
+featuresRouter.post("/overlap-act", async (req: Request<{ id: string }>, res, next) => {
+  try {
+    const productId = req.params.id;
+    const body = (req.body ?? {}) as {
+      action?: unknown;
+      feature_ids?: unknown;
+      reasons?: unknown;
+      names?: unknown;
+      reason?: unknown;
+    };
+    const action = body.action;
+    if (action !== "to-agent" && action !== "ignore") {
+      res.status(400).json({ error: "action must be 'to-agent' or 'ignore'" });
+      return;
+    }
+    if (!Array.isArray(body.feature_ids) || body.feature_ids.length < 2) {
+      res.status(400).json({ error: "feature_ids must be string[] with length >= 2" });
+      return;
+    }
+    const feature_ids = body.feature_ids.filter((x): x is string => typeof x === "string");
+    if (feature_ids.length < 2) {
+      res.status(400).json({ error: "feature_ids must contain valid strings" });
+      return;
+    }
+
+    if (action === "ignore") {
+      const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+      const entry = await appendOverlapIgnored(productId, feature_ids, reason);
+      bumpDataVersion(`products/${productId}/derived/features/overlap-ignored.yml`);
+      res.json({ data: entry, version: getDataVersion() });
+      return;
+    }
+
+    // to-agent: 写全局需求池
+    const reasons = Array.isArray(body.reasons)
+      ? body.reasons.filter((x): x is string => typeof x === "string")
+      : [];
+    const names = Array.isArray(body.names)
+      ? body.names.filter((x): x is string => typeof x === "string")
+      : [];
+    const features = feature_ids.map((fid, i) => {
+      const [moduleId, featureId] = fid.split("/");
+      return { moduleId: moduleId ?? "", featureId: featureId ?? fid, name: names[i] ?? "" };
+    });
+    const content = buildOverlapFeedbackContent({ features, reasons });
+    const entry = await appendGlobalFeedback(productId, "feature", content);
+    bumpDataVersion(`products/${productId}/GLOBAL-FEEDBACK.md`);
+    res.json({ data: { gfbId: entry.id }, version: getDataVersion() });
   } catch (error) {
     next(error);
   }

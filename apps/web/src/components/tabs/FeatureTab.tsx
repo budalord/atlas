@@ -5,6 +5,7 @@ import { useDataChange } from "../../lib/useDataChange";
 import type { ApiEnvelope, FeaturePointPreview, ModuleWithFeatures, RolesRegistry } from "../../types";
 import { FeatureHoverCard } from "../FeatureHoverCard";
 import { FeatureModal } from "../FeatureModal";
+import { FeatureOverlapBanner } from "../FeatureOverlapBanner";
 import { FlowchartView } from "../FlowchartView";
 import { GlobalFeedbackPanel } from "../GlobalFeedbackPanel";
 import { PromptModalDialog, type PromptMode } from "../PromptModalDialog";
@@ -329,6 +330,7 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
           导致 d3 zoom 在脱离 DOM 的 SVG 上读 SVGLength 抛错 + Markmap 实例需重建。
           切回后 SVG 元素是同一个,Markmap 实例 + d3 状态都保留,布局立即可见。 */}
       <div className={`flex min-h-0 flex-1 flex-col ${viewMode === "markmap" ? "" : "hidden"}`}>
+        <FeatureOverlapBanner productId={productId} readOnly={readOnly} />
         <GlobalFeedbackPanel productId={productId} scope="feature" />
         <div className="px-5 pt-3 pb-2 text-[11px] text-slate-500">
           <span className="font-medium text-slate-700">{data.length}</span> 个模块 ·{" "}
