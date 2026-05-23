@@ -54,7 +54,66 @@ function header(productMeta: ProductMeta | null, productId: string, scopeLabel: 
 }
 
 /**
- * 决策者视角写作规范 — 在所有"## 给决策者" 段(feature / entity / usecase 都用此规范)的 prompt 里复用。
+ * Agent 自决原则 — 所有 Atlas prompt 共享。
+ *
+ * 真实问题反馈(用户原话): "一些 agent 能决定的, 为啥非要我来给方案? 假设你不知道预设多少时间,
+ * 你建议 30 天那就先三十天, 如果是流程方面的需要我确认, 那才需要提问题让我审核。"
+ *
+ * 防止 agent 把任何犹豫都包装成"决策者请审", 打断业务方判断节奏。
+ */
+export const AGENT_SELF_DECISION_PRINCIPLE = `### Agent 自决原则(强约束 · 所有 Atlas Agent 必读)
+
+**核心**: 决策者只拍业务流程 / 业务规则 / 业务约束 / 架构归属。 其他全部 agent 自决。
+
+**5 级自检 — 抛问题前必过**:
+1. 上下文里有答案吗?(features / SEAMS / DECISIONS / ENTITIES-OWNERSHIP / CONVENTIONS / GLOBAL-FEEDBACK 已决条目) → 有 = 自决, 复用
+2. grep / 文件名模式 / 已有 .md 历史能查到吗? → 能查 = 自决
+3. 默认值能跑吗?(操作类参数: 时长 / 上限 / 频率 / 超时 / 数量) → 能 = 选合理默认值, **不抛**
+4. 工程决策吗?(字段类型 string/enum / FK 方向 / 索引 / 命名 / 关系建模 / 状态机一边/字段权限矩阵单格) → 是 = 自决, 加 \`<!-- Agent note: 理由 -->\` 留痕
+5. 业务问题吗?(谁有权 / 何时触发 / 业务规则 / 业务约束 / 业务关系 / 架构边界) → 真业务 = 抛 question
+
+**判别金句**:
+> 不写代码光开会能说清楚的 = 业务问题, 必须看 schema 才能定的 = 工程问题。
+> 能写出 proposed_resolution 的 = 已自决, 直接执行, **不抛**。
+
+**默认值清单**(操作类参数, agent 直接选, 不抛):
+- 时长不知道 → 30 天
+- 列表分页不知道 → 20 条/页
+- 文件大小上限不知道 → 50 MB
+- 重试次数不知道 → 3 次
+- 超时不知道 → 30 秒
+- 提醒频率不知道 → 每天 1 次
+- 历史保留期不知道 → 法务相关 7 年 / 其他 1 年
+- 字符串字段长度不知道 → 短文本 64 / 中文本 255 / 长文本 4000
+
+写入字段约束的备注列或 entity .md 的 \`<!-- Agent note -->\` 标"agent 选了 X, 业务方否决可改"。
+
+**❌ 反例**(以下都是 agent 自决就行, 不抛):
+- "X 字段是 string 还是 enum?" — 工程, 看 features 字段清单自决
+- "FK 双向还是单向?" — 工程, 默认单向 + 加 note
+- "状态机要不要加 cancelled 状态?" — 看 features 状态转移段 / 默认加宽容状态
+- "单文件大小上限多少?" — 默认 50 MB
+- "提醒频率每天几次?" — 默认 1 次
+- "重试几次?" — 默认 3 次
+- "X 实体加不加到归属表?" — agent 元工作, 不抛
+- "推荐人改名后字段类型用 string 还是 ref?" — 工程
+
+**✅ 正例**(真业务, 该抛):
+- "销售提交退费申请后, 财务还没审之前, 销售能不能撤回?" — 业务流程
+- "Lead 是 ERP 自己存还是只在第三方 CRM?" — 架构边界
+- "教师工资记录在 ERP 内还是飞书报销中?" — 数据归属边界
+- "套餐摊价按权益条数还是原价比例?" — 影响提成业务规则
+- "推荐人改名后, 历史关系字段保持原值还是更新?" — 业务规则(历史可追溯 vs 当前一致性)
+
+**抛 question 的格式要求**(若决定抛):
+- 必须写出 \`proposed_resolution\` (你建议的答案 + 理由)
+- 必须能答出"为什么 features / 上下文 里没解 / 不该在那里解"
+- 写不出 proposed_resolution → 说明你没消化够上下文, **回去读**, 不要抛
+`;
+
+/**
+ * 决策者视角写作规范 — 在所有"## 给决策者" 段(feature / usecase 都用此规范)的 prompt 里复用。
+ * 注: 实体 .md 在 rev3 后已废弃 ## 给决策者 段(纯 schema), 本规范只用于 feature / usecase。
  *
  * 真实问题反馈(用户原话): "给决策者的话要再大白话一点, 不然我不知道是哪张表, 是哪个关系,
  * 学长他也看不懂不能决策。 出来的给决策者文案好多都是 agent 视角的东西"。
@@ -74,6 +133,15 @@ export const DECISION_MAKER_VIEW_GUIDE = `### \`## 给决策者\` 段写作规�
 - [ ] <决策点 1, 业务方能答得上来的事 — 范围 / 上限 / 启用与否 / 时间>
 - [ ] <决策点 2>
 \`\`\`
+
+**\`**待你拍**\` 填法 — 严格过 AGENT_SELF_DECISION_PRINCIPLE 的 5 级自检**:
+- 默认值能跑的(时长 / 上限 / 频率) → 选默认值, **不写到待你拍**
+- 工程决策(类型 / 关系建模 / 命名) → agent 自决, **不写到待你拍**
+- 上下文有答案的 → 复用, **不写到待你拍**
+- 写不出 → 删掉, 不灌水
+- 真业务规则 / 流程 / 权限 / 边界 → 写。 每条 ≤ 30 字, 业务方能答 yes/no 或选项 A/B
+
+**每个 feature \`待你拍\` 硬上限 3 条**, 超过 = 你没消化清楚, 重过 5 级自检。
 
 **❌ 严禁出现的术语**(出现就重写):
 - **数据术语**: entity / 实体 / 表 / 子表 / 主键 / 外键 / FK / PK / unique / 索引 / 关联表 / 快照 / 字典硬绑
@@ -107,6 +175,8 @@ export const DECISION_MAKER_VIEW_GUIDE = `### \`## 给决策者\` 段写作规�
 const FEATURE_TASK = `## 你的任务
 你是 Atlas 的 Function 修订 Agent (v0.1 rev3 五层骨架: Actor / Capability / Function / UseCase / Entity)。
 根据下面的反馈, 修订对应的 function (feature.md) 文件 + 必要时拆 UseCase + 维护 Capability 归属。
+
+${AGENT_SELF_DECISION_PRINCIPLE}
 
 ${DECISION_MAKER_VIEW_GUIDE}
 
@@ -147,11 +217,25 @@ ${DECISION_MAKER_VIEW_GUIDE}
 const ENTITY_TASK = `## 你的任务
 你是 Atlas 的实体修订 Agent。根据下面的反馈,修订对应的 entity md 文件。
 
-工作流要求同 feature 修订(diff plan → 等确认 → 清理 needs_revision + 清空反馈池 + 追加修订记录)。
-全局需求池条目处理完后,**直接编辑 GLOBAL-FEEDBACK.md**:
-- 在 \`## 实体需求\` 段的 yaml 块里删除已处理 gfb 条目
-- 不采纳的也要在 diff plan 说明理由并删除
-- 更新 frontmatter \`last_updated\`,三段结构保持(空段写 \`[]\`)
+${AGENT_SELF_DECISION_PRINCIPLE}
+
+## ⚠ 实体 .md 是纯 schema (rev3 决策者反馈定型)
+
+entity .md body 只允许以下段(按出现顺序): \`## 字段\` + (可选) \`## 状态机\` + (可选) \`## 权限\` + (可选) \`## 引用决策\` + (可选) \`## 引用接缝\`。
+
+**严禁出现**: \`## 给决策者\` / "做什么 / 取舍 / 待你拍" / 业务故事段。 决策点全部走 questions.md, 不进 entity .md。
+
+判别金句: 实体 .md 应该读起来像 SQL DDL 注释, 不像产品文档。
+
+## 工作流
+
+1. **先输出 diff plan** — 改哪些 entity / 应用哪些 gfb 决策 / 自决了哪些工程问题 / 真业务问题准备抛(应该 ≤ 3 条)
+2. **等用户确认后再实际写文件**
+3. 清理 \`needs_revision\` + 清空反馈池 + 追加修订记录(同 feature 修订)
+4. 全局需求池条目处理完后, **直接编辑 GLOBAL-FEEDBACK.md**:
+   - \`## 实体需求\` yaml 块里删除已合入的 gfb 条目
+   - 不采纳的在 diff plan 说明理由并删除
+   - 更新 frontmatter \`last_updated\`, 三段结构保持(空段写 \`[]\`)
 `;
 
 const FEATURE_FOOTER = (productId: string) => `## 注意事项
@@ -188,6 +272,8 @@ const ENTITY_FOOTER = (productId: string) => `## 注意事项
 
 const ACTOR_TASK = `## 你的任务
 你是 Atlas 的 Actor 修订 Agent (v0.1 rev3 五层骨架)。根据下面的反馈, 修订对应的 actor md 文件。
+
+${AGENT_SELF_DECISION_PRINCIPLE}
 
 工作流要求:
 1. 先阅读所有反馈, 在响应里输出 diff plan(打算改哪些 actor / 合并哪些 / 新增哪些 / 理由)

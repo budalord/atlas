@@ -5,6 +5,7 @@ import { featureFilePath, loadFeature } from "./entityLoader";
 import { parseFeatureMarkdown } from "./featureParser";
 import { runCodex } from "./codexRunner";
 import { bumpDataVersion } from "./watcher";
+import { AGENT_SELF_DECISION_PRINCIPLE, DECISION_MAKER_VIEW_GUIDE } from "./revisePromptBuilder";
 
 /**
  * 单 agent 串行任务队列。每次最多跑 1 个,任务跑完后状态变 awaiting_review,
@@ -192,7 +193,11 @@ function composePrompt(
     .map((c) => `- (${c.date}) ${c.content}`)
     .join("\n");
 
-  return `你是一个产品功能点描述优化助手。
+  return `你是 Atlas 的功能点描述优化 Agent (codex 非交互任务, 没有 human-in-loop, 全部自决)。
+
+${AGENT_SELF_DECISION_PRINCIPLE}
+
+${DECISION_MAKER_VIEW_GUIDE}
 
 当前功能点:
 - id: ${parsed.id}
@@ -209,13 +214,14 @@ ${pending || "(空)"}
 ${resolved || "(空)"}
 
 任务要求:
-1. 改写"## 描述"段,自然融入 pending 线索里的合理建议(冲突的、明显不合理的可不采纳,但要保留意图)
-2. 把所有 pending 线索移动到 resolved 段,日期保留原值
-3. 不要修改 frontmatter 的 id / name / module / created_at 字段;可以更新 last_refined_at 为今天 (${new Date()
+1. 改写"## 描述"段, 自然融入 pending 线索里的**合理**建议; 冲突的 / 明显不合理的 / **违反 AGENT_SELF_DECISION_PRINCIPLE 的**(操作参数无脑要决策者拍 / 工程决策包装成业务等) 不采纳但在 resolved 里标"未采纳: <理由>"
+2. 把所有 pending 线索移动到 resolved 段, 日期保留原值
+3. **如果线索涉及"给决策者" 内容**: 同步更新 \`## 给决策者\` 段, 严格按 DECISION_MAKER_VIEW_GUIDE 写, \`**待你拍**\` 段过 5 级自检 — 默认值能跑的选默认, 工程决策自决, 真业务规则才进 \`**待你拍**\` (硬上限 3 条)
+4. 不要修改 frontmatter 的 id / name / module / created_at 字段; 可以更新 last_refined_at 为今天 (${new Date()
    .toISOString()
    .slice(0, 10)})
-4. 不要修改其他段落 (## 线索池, ### Pending, ### Resolved 的标题保留)
-5. 直接输出**完整**的新 md 文件内容(包含 frontmatter),不要套 \`\`\`markdown 代码块,不要加任何解释性前后缀${
+5. 不要修改其他段落 (## 线索池, ### Pending, ### Resolved 的标题保留)
+6. **直接输出完整**的新 md 文件内容(包含 frontmatter), 不要套 \`\`\`markdown 代码块, 不要加任何解释性前后缀${
     extra
       ? `
 

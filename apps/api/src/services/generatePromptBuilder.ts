@@ -9,7 +9,7 @@ import { parseGlobalFeedbackFile } from "./globalFeedbackParser";
 import { loadActors } from "./actorLoader";
 import { loadCapabilities, attachCapabilityRefs } from "./capabilityLoader";
 import { loadUseCases } from "./usecaseLoader";
-import { DECISION_MAKER_VIEW_GUIDE } from "./revisePromptBuilder";
+import { AGENT_SELF_DECISION_PRINCIPLE, DECISION_MAKER_VIEW_GUIDE } from "./revisePromptBuilder";
 
 export interface FeatureGenerateStats {
   has_description: boolean;
@@ -158,7 +158,10 @@ Project
 3. 严格遵守输出约定
 4. 新建文件不加 needs_revision 标签
 5. 每个 function 都必须写 \`## 给决策者\` 段, **严格按下方写作规范**, 三段格式 + 不出现 schema 黑话
+6. \`## 给决策者\` 的 \`**待你拍**\` 段过 AGENT_SELF_DECISION_PRINCIPLE 5 级自检 — 默认值 / 工程决策 / 上下文有答案的全部 agent 自决, 不灌水, 每 feature ≤ 3 条
 `,
+    "",
+    AGENT_SELF_DECISION_PRINCIPLE,
     "",
     DECISION_MAKER_VIEW_GUIDE,
     "",
@@ -314,12 +317,21 @@ export async function buildEntityGeneratePrompt(productId: string): Promise<Gene
 你是 Atlas 的实体 Agent。基于产品的全部 **features**,识别出业务**实体**(Entity),
 为每个实体生成 entity md 文件。
 
+${AGENT_SELF_DECISION_PRINCIPLE}
+
+## ⚠ 实体 .md 是纯 schema (rev3 决策者反馈定型)
+
+**严禁出现**: \`## 给决策者\` / "做什么 / 取舍 / 待你拍" / 业务故事段。 决策点全部走 questions.md / 抛业务 question(若有), 不进 entity .md。
+
+判别金句: 实体 .md 应该读起来像 SQL DDL 注释, 不像产品文档。
+
 工作流要求:
 1. 先输出**生成计划**:打算识别哪些实体、放在顶层(共享)还是放在某 module 下、关键字段与关系
 2. **等用户确认后再实际写文件**
 3. 每个 entity.md 必须含 \`## 字段\` 表格(5 列: 字段名 / 类型 / 必填 / 约束 / 备注)、
    \`## 关系\` 列表、\`## 决策\` 列表;末尾加空 \`## 反馈池\` 段(yaml 块 [])
 4. 不确定的字段在备注列写 \`[TBD]\`,parser 会识别为 TBD
+5. 默认值能跑的(字段长度 / 必填阈值 / 上限)按 AGENT_SELF_DECISION_PRINCIPLE 默认值清单选, 写到字段约束/备注列, 不抛
 `,
     warning,
     "## 当前已知信息",
@@ -381,12 +393,15 @@ export async function buildConventionsGeneratePrompt(productId: string): Promise
 你是 Atlas 的规范 Agent。基于现有 **features + entities**,识别出该产品级别的**规范约束**(L0),
 生成 \`CONVENTIONS.md\`。L0 是 Agent 在 L1(实体)/ L2(功能点)操作时必须遵循的硬约束基线。
 
+${AGENT_SELF_DECISION_PRINCIPLE}
+
 工作流要求:
 1. 先输出**生成计划**:打算从哪些 features/entities 中归纳哪几条规范
 2. **等用户确认后再实际写文件**
 3. 输出文件: \`data/products/${productId}/CONVENTIONS.md\`
 4. frontmatter 写 \`spec_level: 0\` 和 \`version: 1\`(或递增)+ \`last_updated\`
 5. 不要把无法落到约束的"经验性建议"写进 L0;L0 只装"硬约束"
+6. 识别出的规范如有歧义, **agent 选最严格可执行的版本**, 加 \`<!-- Agent note: 选 X 而非 Y, 因 ... -->\` 留痕, **不抛 question**。 CONVENTIONS.md 是 agent 归纳的硬约束基线, 不该有 pending 决策。
 `,
     warning,
     "## 当前已知信息",
@@ -547,6 +562,8 @@ ${statesLine}`
 
   const parts = [
     header(meta, productId, "Path C 实体派生"),
+    AGENT_SELF_DECISION_PRINCIPLE,
+    "",
     `## 你的任务
 你是 Atlas 的 Path C **实体派生 Agent**。基于产品的 5 类 source 输入(features × N / SEAMS / DECISIONS /
 ENTITIES-OWNERSHIP / GLOBAL-FEEDBACK[entity 段] + questions-decisions.yml),产出 derived 实体清单 + reconcile 报告 + questions。
@@ -650,34 +667,19 @@ ENTITIES-OWNERSHIP / GLOBAL-FEEDBACK[entity 段] + questions-decisions.yml),产�
 
 **判别金句**: 实体 .md 应该读起来像 SQL DDL 注释, 不像产品文档。
 
-## ⚠ 抛 question 前必读(见 entity-contract §6.3.5)
+## ⚠ 实体派生场景特有的反例(在 AGENT_SELF_DECISION_PRINCIPLE 之外补充)
 
-**用户做业务规则决定,不做 schema/工程决定**。
+通用 5 级自检 / 默认值清单 / 一般工程反例已在 prompt 顶部 § Agent 自决原则 段, 那里已经禁了"字段类型 / FK 方向 / 状态机一边" 这种工程问题。
 
-抛 question 前必过 5 级自检:
-1. feature.md / SEAMS / DECISIONS / ENTITIES-OWNERSHIP 中有答案? → 有,自决
-2. 已有 entity .md / 既往派生历史中有答案? → 有,自决
-3. 能用 grep / ls / 模式匹配判断? → 能,自己查,自决
-4. 业务问题 vs 工程问题?
-   - 工程(字段 vs 表 / 类型 / 命名 / 关系建模) → 自决,可在 entity md 加 \`<!-- Agent note: ... -->\` 留 trail
-   - 业务(谁有权 / 何时触发 / 业务约束) → 去第 5 级
-5. 能写出 proposed_resolution? → 能写出 = 已自决 = **直接执行,不抛**
+实体派生场景**特别要注意的反例**(不许抛):
+- ❌ "ENTITIES-OWNERSHIP 表里声明无派生的 X 还需要吗?"(reconcile 报告里你自己写"已被 X 替代 / v0 不做"的判断 = 已自决)
+- ❌ "派生有声明无的 N 个实体是否加入归属表?"(agent 元工作 — 把建议直接写进 reconcile-report 的"建议 layer"列, 不抛)
+- ❌ "Lead 的 layer 是机构层还是校区?"(看 features 是否跨校区使用即可自决; 没线索 → 标 [TBD] + agent note)
 
-**判别金句**:不写代码光开会能说清楚的是业务问题,必须看 schema 才能定的是工程问题。
-
-**反例**(本轮派生 Agent 不许抛):
-- ❌ "X 字段是 string 还是 enum?"(看 feature 字段清单 / 自决)
-- ❌ "X 是 FK 还是嵌入?"(关系建模 / 自决)
-- ❌ "状态机要不要加 X 状态?"(看 feature 状态转移段 / 自决)
-- ❌ "X 是否应该有索引?"(纯工程)
-- ❌ "ENTITIES-OWNERSHIP 表里声明无派生的 X 还需要吗?"(reconcile 报告里你自己写"已被 X 替代 / v0 不做"的判断 = 已自决, 不要再抛)
-- ❌ "派生有声明无的 N 个实体是否加入归属表?"(归属表同步是 agent 元工作, 不是决策者业务, 把建议直接写进 reconcile-report 的"建议 layer"列即可)
-- ❌ "Lead 的 layer 是机构层还是校区?"(看 features 是否跨校区使用即可自决 — 没线索就标 [TBD] + agent note, 不抛 question)
-
-**正例**:
-- ✅ "推荐人改名后,推荐关系字段保持 id 还是写历史 name?"(业务规则)
+**真业务正例**(可以抛):
+- ✅ "推荐人改名后, 推荐关系字段保持 id 还是写历史 name?"(业务规则: 历史可追溯 vs 当前一致性)
 - ✅ "SEAMS §5.6 三边契约里财务先动还是教务先动?"(业务流程)
-- ✅ "Entitlement 撤销时,关联的 AttendanceRecord 是删还是留作历史?"(业务约束)
+- ✅ "Entitlement 撤销时, 关联的 AttendanceRecord 是删还是留作历史?"(业务约束)
 `,
     "",
     "## 当前已知信息",
