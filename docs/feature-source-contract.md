@@ -1,9 +1,13 @@
-# Atlas 功能点 Source 契约
+# Atlas Function Source 契约
 
-> 这份文档是 Atlas **功能点 (`features/<f>.md`)** 这一类 source-of-truth 文件的形式契约,
-> 是写 Agent (生成/修订 feature.md 的) 和 派生 Agent (流程图、实体派生等) 之间的接口规范。
+> 这份文档是 Atlas **Function (`modules/<m>/features/<f>.md`)** 这一类 source-of-truth 文件的形式契约,
+> 是写 Agent (生成/修订 function.md 的) 和 派生 Agent (流程图、实体派生等) 之间的接口规范。
 >
 > **修改本契约需要架构层级审批,不要由实现侧自行调整。**
+>
+> **v0.1 (rev3) 术语澄清**: 历史上称为 "功能点 / feature point" 的对象, 在五层骨架重构后语义上对应 **Function** (Capability 的子层)。
+> 物理文件路径保持 `modules/<m>/features/<f>.md` 不变(渐进式不动旧路径), 但概念上是 Function。
+> UseCase 是 Function 的可选子层, 见 [usecase-contract.md](usecase-contract.md)。
 
 ---
 
@@ -21,14 +25,17 @@
 
 - 派生层 (flowchart / entity) 的产物格式 —— 各有各的契约
 - 描述里的具体文字风格 (留给写 Agent 自由发挥)
-- module / group 划分原则 —— 由 Atlas 三层架构 (业务方向 / 管理模块 / 功能点) 设计原则约束
+- Capability 划分原则 —— 见 [capability-contract.md](capability-contract.md) §4 粒度规则
+- UseCase 拆分原则 —— 见 [usecase-contract.md](usecase-contract.md) §3 拆分规则
 
 ### 1.3 设计原则 (不可妥协)
 
 1. **三种约束承载并存**: 轻 (描述写作规范) + 中 (frontmatter 结构化字段) + 重 (可选专门段)
-2. **重形态全部可选**: 简单 feature 可省略;复杂 feature 按需补
+2. **重形态全部可选**: 简单 function 可省略;复杂 function 按需补
 3. **Agent-friendly 容错**: 缺段 / 格式坏 → parser 返回 undefined,不阻塞
 4. **派生覆盖率取决于 source 信号密度**: 写得越规范,派生越准
+5. **Function.id 产品内全局唯一** (规则 1): 即便不同 module 子目录下也不允许同名。Loader 启动跑完整性校验, 重复抛错。
+6. **强制归属 Capability** (v0.1 rev3): 每个 function 必须有 `capability_id` 引用一个存在的 Capability。 缺失 → UI ⚠ + l0 警告 (软兼容旧文件, 不阻塞加载)。
 
 ---
 
@@ -37,25 +44,22 @@
 ```yaml
 ---
 # ─── 必填 frontmatter ──────────────────
-id: <kebab-case>                          # feature id,在 module 内唯一
-name: <显示名>                            # 中文显示名
-module: <moduleId>                        # 业务方向 (= modules/ 下目录名)
+id: <kebab-case>                          # function id, **产品内全局唯一**(规则 1)
+name: <显示名>                            # 中文显示名(不带括号补充, 那种内容拆 UseCase)
+module: <moduleId>                        # 业务方向 (= modules/ 下目录名), 保留作物理路径+团队归属
+capability_id: <capabilityId>             # **v0.1 必填** 归属的 Capability id, 引用 capabilities/<id>.md
+                                          # 软兼容: 缺失 → UI ⚠ + l0 警告, 不阻塞加载
 created_at: YYYY-MM-DD
 
-# ─── 三层架构中层 (强烈建议填) ─────────
-module_group: <groupId>                   # 管理模块 id,引用 MODULE.md 的 groups[].id
-
-# ─── 角色 (建议填) ─────────────────────
-roles:                                    # 参与该 feature 的角色 id 列表
-  - <roleId>
-  - ...
-
 # ─── 中形态:结构化提示 (建议填) ────────
-entities_touched:                         # 该 feature 操作的实体规范名清单
+actor_ids:                                # **v0.1 重命名 from roles** 参与该 function 的 actor id 列表
+  - <actorId>                             # 引用 actors/<id>.md
+  - ...
+entities_touched:                         # 该 function 操作的实体规范名清单
   - <EntityName>
   - ...
 ownership: <org | campus | follows:Entity | shared>
-                                          # 该 feature 主体实体的归属层
+                                          # 该 function 主体实体的归属层
 
 # ─── 可选 frontmatter (parser 已支持) ──
 needs_revision: false                     # Agent 自动管理
@@ -63,6 +67,12 @@ spec_level: 0                             # 规范层级(默认 0)
 last_refined_at: null                     # Agent 上次 refine 时间
 added_in_phase: live                      # 在哪个 phase 被追加 (planning/in-progress/live)
 added_at: YYYY-MM-DD
+reviewed_at: YYYY-MM-DD                   # 决策者审阅戳, 见决策者审阅闭环 plan
+reviewed_by: <handle>                     # 审阅人
+
+# ─── 兼容旧字段 (parser 软兼容, 不再推荐) ───
+# roles: [...]                            # parser 自动 alias 到 actor_ids
+# module_group: <groupId>                 # parser 容错, 不再用作骨架层
 ---
 
 # <name>
@@ -115,12 +125,23 @@ added_at: YYYY-MM-DD
 
 ## 3. 字段语义详解
 
-### 3.1 三层架构定位字段
+### 3.1 五层骨架定位字段(v0.1 rev3)
 
-- `module` — **业务方向** (sales / finance / academic-affairs ...)。对应物理目录 `modules/<module>/`
-- `module_group` — **管理模块** (student-management / order-management ...)。引用 `MODULE.md` frontmatter.groups[].id
-  - 缺省 → markmap 显示为"未分组"
-  - 引用 MODULE.md 未声明的 group → UI 显示 `<id> ⚠`,parser 仍透传
+新 5 层骨架: **Project → Domain → Capability → Function → UseCase**
+
+Function 通过下面字段定位:
+- `module` — **物理目录 + 团队归属** (sales / finance / academic-affairs ...)。对应物理路径 `modules/<module>/features/`。**注意 v0.1 起 module 退化为物理目录, 不再是结构骨架的一层**(走 (A) 路线)
+- `capability_id` — **v0.1 新, 必填** 归属的 Capability id, 引用 `capabilities/<id>.md`。决定 markmap 上 function 挂在哪个 capability 下。
+  - 缺失 → 软兼容: parser 仍加载, UI 标 ⚠"未归属 capability" + l0Linter 警告
+  - 引用不存在的 capability_id → l0Linter 规则 a 警告
+- `actor_ids` — **v0.1 重命名 from `roles`** 参与该 function 的 actor id 列表, 引用 `actors/<id>.md`
+  - 软兼容: 旧字段 `roles` 自动 alias 到 `actor_ids` (parser 透明转换)
+
+### 3.1.1 ⚠ 已废弃字段
+
+- `module_group` — v0.0 时代的"管理模块"分层, v0.1 起被 `capability_id` 取代
+  - parser 仍容错读取, 但 markmap 不再渲染该层
+  - 反推迁移路径: `module_group: X` → 创建对应的 capability + 把 function 的 capability_id 指向新 capability
 
 ### 3.2 中形态字段
 
@@ -289,17 +310,21 @@ entities_touched: [User, Order, Payment]
 docs/feature-source-contract.md (本文档)
     │
     │ 约束 → modules/<m>/features/<f>.md 的写法
-    │ 约束 → modules/<m>/MODULE.md 的 groups[] 声明
     │ 约束 → 聚合 md (Tab 1 录入) 的 feature 区段格式
+    │
+    │ 引用 → docs/capability-contract.md  (function.capability_id 引用 capability.id)
+    │ 引用 → docs/actor-contract.md       (function.actor_ids 引用 actor.id)
+    │
+    │ 被引用 ← docs/usecase-contract.md   (usecase.function_id 引用 function.id)
     │
     ▼
 派生 Agent 接口契约:
     ├─ docs/flowchart-contract.md (流程图派生)
-    └─ docs/entity-contract.md (实体派生 · 待写,Path C 落地时)
+    └─ docs/entity-contract.md (实体派生 Path C)
 ```
 
-- 修改本契约可能需要同步修改 ATLAS-SPEC.md (user-facing format spec)
-- 修改本契约不影响 flowchart-contract / entity-contract,除非新增/删除 frontmatter 字段会改变派生 Agent 的输入信号
+- 修改本契约需要同步修改 ATLAS-SPEC.md (user-facing format spec)
+- 修改本契约影响 flowchart-contract / entity-contract / usecase-contract — 新增/删除 frontmatter 字段会改变派生 Agent 的输入信号
 
 ---
 
@@ -309,3 +334,8 @@ docs/feature-source-contract.md (本文档)
 - 修改 §4 容错规则 → 不影响 source 文件,只改 parser
 - 修改 §6 写作规范 → 只改 prompt builder
 - §1, §5, §7, §8 是说明性,可独立更新
+
+### 修改 trail
+
+- 2026-05-23: v0.1 rev3 五层骨架重构 — 加 `capability_id` 必填, `roles` → `actor_ids` 重命名, `module_group` 废弃, 加规则 1(id 全局唯一)。 见 [plan-generic-elephant.md](../../.claude/plans/plan-generic-elephant.md)。
+- 旧版: v0.0 三层架构 (module / module_group / feature)

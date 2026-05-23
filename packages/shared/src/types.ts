@@ -392,12 +392,24 @@ export interface FeaturePoint {
    */
   roles?: string[];
   /**
-   * 管理模块 id(三层架构的中层归属)。引用所属 module 的 frontmatter.groups[].id。
-   * 父 MODULE.md 未声明 groups 时,该字段是自由文本;声明时,parser 仍透传但
-   * UI 显示侧可标"未在 module 声明的 group"。空/缺省 → 该 feature 直接挂在 module 下
-   * (markmap 渲染"未分组"占位组)。
+   * 管理模块 id(v0.0 三层架构的中层归属)。
+   * **v0.1 rev3 起废弃**, 由 `capability_id` 取代。parser 仍容错读取, 但 UI 不再用作骨架层。
+   * 见 docs/feature-source-contract.md §3.1.1。
    */
   module_group?: string;
+  /**
+   * **v0.1 rev3 新, 必填(软兼容)** 归属的 Capability id。
+   * 引用 `capabilities/<id>.md`。 缺失 → parser 仍加载 + UI 标 ⚠ + l0Linter 警告。
+   * 见 docs/capability-contract.md。
+   */
+  capability_id?: string;
+  /**
+   * **v0.1 rev3 重命名** 从 `roles` 改为 `actor_ids`。
+   * 参与该 function 的 actor id 列表, 引用 `actors/<id>.md`。
+   * parser 自动 alias 旧 `roles` 字段到 `actor_ids`(透明转换), 后续应填写 `actor_ids`。
+   * 与 `FeaturePoint.roles` 完全等价, parser 同步两者。
+   */
+  actor_ids?: string[];
   /**
    * 中形态(feature-source-contract §3.2):该 feature 操作的实体规范名清单
    * (per flowchart-contract §3.4,PascalCase 同表多名规则)。
@@ -425,6 +437,100 @@ export interface FeaturePoint {
    * 重形态:`## 字段权限` 段解析结果(变长列表格)。缺段 → undefined。
    */
   field_permissions?: FieldPermissionRow[];
+}
+
+/* ============================================================
+ *  v0.1 rev3 五层骨架 — Actor / Capability / UseCase
+ *  见 docs/actor-contract.md / capability-contract.md / usecase-contract.md
+ * ============================================================ */
+
+export type ActorType = "internal_user" | "external_user" | "external_system";
+export type ActorSource = "user_input" | "agent_suggested" | "inferred_from_function";
+
+/**
+ * Actor — 项目级 first-class 角色对象 (`actors/<id>.md`)。
+ * 见 docs/actor-contract.md。
+ */
+export interface Actor {
+  id: string;                       // kebab-case, 产品内全局唯一
+  name: string;                     // 中文显示名
+  type: ActorType;
+  source: ActorSource;
+  confirmed: boolean;
+  code?: string;                    // 可选, 大写代码
+  responsibilities?: string;        // 一句话职责摘要
+  /** body 原文(供 UI markdown 渲染), 不含 frontmatter */
+  body: string;
+}
+
+/**
+ * ActorWithRefs — Actor + loader 运行时聚合的反向引用。
+ * 反向引用 **绝不写回 md frontmatter**(规则 4)。
+ */
+export interface ActorWithRefs extends Actor {
+  related_capability_ids: string[];  // 反查 capability.actor_ids
+  related_function_ids: string[];    // 反查 function.actor_ids
+  related_usecase_ids: Array<{ function_id: string; usecase_id: string }>;
+                                     // 反查 usecase.actor_id
+}
+
+export type CapabilityStatus = "draft" | "confirmed";
+                                     // MVP-1 二态 (规则 3)
+                                     // in_design / implemented 留待后续
+export type CapabilityPriority = "P0" | "P1" | "P2";
+export type CapabilitySource = "user_input" | "agent_suggested" | "inferred_from_features";
+
+/**
+ * Capability — 业务能力 (`capabilities/<id>.md`)。
+ * 见 docs/capability-contract.md。
+ */
+export interface Capability {
+  id: string;                       // kebab-case, 产品内全局唯一
+  name: string;                     // 动宾短语 (规则 8)
+  domain: string;                   // 从预定义池选 (规则 2)
+  value_statement: string;          // "谁 + 通过什么 + 达到什么目的"
+  actor_ids: string[];              // 真源
+  entity_ids: string[];             // 真源 (引用 Entity 规范名)
+  priority: CapabilityPriority;
+  status: CapabilityStatus;
+  source: CapabilitySource;
+  confirmed: boolean;
+  body: string;                     // ## 业务描述 / ## 关键决策 ...
+}
+
+/**
+ * CapabilityWithRefs — Capability + 运行时聚合的反向引用。
+ */
+export interface CapabilityWithRefs extends Capability {
+  function_ids: string[];           // 反查 function.capability_id
+}
+
+/**
+ * UseCase — 业务场景 (`modules/<m>/usecases/<scenario>.md`)。
+ * 见 docs/usecase-contract.md。
+ */
+export interface UseCase {
+  id: string;                       // function 内唯一
+  module: string;                   // 物理目录
+  function_id: string;              // 真源, 裸 id (规则 1)
+  actor_id: string;                 // 真源, 主参与者(单数)
+  entity_ids?: string[];            // 可选, 默认继承 function.entities_touched
+  precondition?: string;
+  postcondition?: string;
+  source?: "user_input" | "agent_suggested" | "inferred_from_function_name";
+  body: string;                     // ## 主流程 / ## 备选流程 / ## 备注
+}
+
+/**
+ * 五层骨架的引用完整性 lint 结果 (l0Linter 规则 6 输出)。
+ */
+export interface ReferenceIntegrityIssue {
+  level: "warning";
+  rule: "function-missing-capability" | "function-unknown-capability"
+      | "capability-unknown-actor" | "capability-unknown-entity"
+      | "usecase-unknown-function" | "usecase-unknown-actor";
+  source: string;                   // 出错文件相对路径
+  detail: string;                   // 具体引用了什么不存在的 id
 }
 
 /* ============================================================
