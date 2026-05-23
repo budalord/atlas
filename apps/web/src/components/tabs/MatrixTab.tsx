@@ -144,13 +144,13 @@ export function MatrixTab({ productId }: MatrixTabProps) {
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-5 py-2.5">
         <div className="flex items-center gap-1">
           <KindButton active={kind === "actor-capability"} onClick={() => setKind("actor-capability")}>
-            Actor × Capability
+            角色 × 能力
           </KindButton>
           <KindButton active={kind === "actor-entity"} onClick={() => setKind("actor-entity")}>
-            Actor × Entity
+            角色 × 实体
           </KindButton>
           <KindButton active={kind === "capability-entity"} onClick={() => setKind("capability-entity")}>
-            Capability × Entity
+            能力 × 实体
           </KindButton>
         </div>
 
@@ -190,18 +190,18 @@ export function MatrixTab({ productId }: MatrixTabProps) {
                   {view.cols.map((col) => (
                     <th
                       key={col.id}
-                      className="border-b border-slate-200 px-2 py-2 text-left align-bottom font-mono font-medium text-slate-700"
-                      title={col.name}
+                      className="border-b border-slate-200 px-1 py-2 text-left align-bottom font-medium text-slate-700"
+                      title={`${col.name} (${col.id})`}
                     >
                       <div
-                        className="whitespace-nowrap"
+                        className="flex h-[140px] flex-col items-start justify-end gap-1 whitespace-nowrap"
                         style={{
                           writingMode: "vertical-rl",
-                          transform: "rotate(180deg)",
-                          height: "120px"
+                          transform: "rotate(180deg)"
                         }}
                       >
-                        {col.id}
+                        <span className="text-[11px] text-slate-700">{col.name}</span>
+                        <code className="font-mono text-[9px] text-slate-400">{col.id}</code>
                       </div>
                     </th>
                   ))}
@@ -435,8 +435,8 @@ function buildActorCapability(
     rows: actors.map((a) => ({ id: a.id, name: a.name })),
     cols: capabilities.map((c) => ({ id: c.id, name: c.name })),
     cells,
-    rowKindLabel: "Actor",
-    colKindLabel: "Capability",
+    rowKindLabel: "角色",
+    colKindLabel: "能力",
     rowCounts,
     colCounts
   };
@@ -488,8 +488,8 @@ function buildActorEntity(
       return { id: e, name: ent ? `${e}${ent ? "" : "⚠"}` : `${e} ⚠未派生` };
     }),
     cells,
-    rowKindLabel: "Actor",
-    colKindLabel: "Entity",
+    rowKindLabel: "角色",
+    colKindLabel: "实体",
     rowCounts,
     colCounts
   };
@@ -533,8 +533,8 @@ function buildCapabilityEntity(
       return { id: e, name: ent ? e : `${e} ⚠未派生` };
     }),
     cells,
-    rowKindLabel: "Capability",
-    colKindLabel: "Entity",
+    rowKindLabel: "能力",
+    colKindLabel: "实体",
     rowCounts,
     colCounts
   };
