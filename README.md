@@ -26,7 +26,6 @@ npm run dev
 - **L0 规范文件 + 产品规格层文件**:`CONVENTIONS.md` 装产品级硬约束;`DECISIONS.md` / `SEAMS.md` / `RISKS.md` 等装产品级横切信息(Round 4 阶段 1 仅渲染原文)。
 - **Codex 任务队列**:UI 直接触发 Codex 在后台跑 refine/generate 任务,完成后给 diff 区让你接受/拒绝。
 - **GitHub 集成**:在 meta.yml 填 `repo: owner/name`,详情页 Git 区显示最近 commit + PR/Issue。
-- **流程图派生**:`derived/flowcharts/main.mmd` 由功能点 source 派生,严格遵守 [flowchart-contract](docs/flowchart-contract.md)。
 - **文件监听 + SSE**:`chokidar` 监听 `data/`,前端通过 `/api/events` 收 `data-change` 自动 refetch。
 
 ## 仓库结构
@@ -46,7 +45,6 @@ docs/
   ATLAS-SPEC      —— markdown 规范(产品/模块/功能点/实体文件结构)
   DATA-MODEL      —— 数据形态总览
   ARCHITECTURE    —— 服务端 + 前端架构
-  flowchart-contract       —— 流程图派生契约
   feature-source-contract  —— 功能点 source 契约
   EXTENSION-GUIDE —— 扩展点指南
 AGENTS.md / .claude/skills/alts/SKILL.md   —— Agent 操作规范(双镜像,以 AGENTS.md 为准)

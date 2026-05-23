@@ -465,7 +465,7 @@ function escapeRe(s: string): string {
 }
 
 /* ============================================================
- *  questions.md 加载 + 解析(对偶 flowcharts 模式)
+ *  questions.md 加载 + 解析(见 entity-contract §6.3)
  * ============================================================ */
 
 /**
@@ -518,7 +518,7 @@ export async function loadEntityQuestions(productId: string): Promise<DerivedEnt
   // 富集 status: 跨 GLOBAL-FEEDBACK(accept/custom) + questions-decisions.yml(reject) 合并判定
   await enrichQuestionStatus(productId, questions);
 
-  // trigger lint(同 flowchart §6.3.4):trigger.original_text 必须在 feature_path 中字面命中
+  // trigger lint(entity-contract §6.3.4):trigger.original_text 必须在 feature_path 中字面命中
   const lintErrors = await lintTriggers(productId, questions);
   const all = [...errors, ...lintErrors];
 

@@ -189,7 +189,6 @@ function OverviewSection({
 }) {
   const summary = extractSection(product.statusMarkdown, "当前状态");
   const blockers = extractSection(product.statusMarkdown, "阻塞");
-  const flowchart = extractSection(product.statusMarkdown, "流程图");
   // 立项阶段(discovering + planning,统一映射为 phase=planning)不挂 git:源代码还没起,GitHub 数据无意义。
   const showGit = phase !== "planning";
 
@@ -210,12 +209,6 @@ function OverviewSection({
       {blockers ? (
         <Card title="阻塞" tone="warning">
           <MarkdownRenderer markdown={blockers} />
-        </Card>
-      ) : null}
-
-      {flowchart ? (
-        <Card title="流程图">
-          <MarkdownRenderer markdown={flowchart} />
         </Card>
       ) : null}
 

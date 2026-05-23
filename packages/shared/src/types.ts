@@ -412,7 +412,7 @@ export interface FeaturePoint {
   actor_ids?: string[];
   /**
    * 中形态(feature-source-contract §3.2):该 feature 操作的实体规范名清单
-   * (per flowchart-contract §3.4,PascalCase 同表多名规则)。
+   * (PascalCase 同表多名规则)。
    * 派生 Agent 的种子信号;不强制写,缺省 undefined。
    */
   entities_touched?: string[];
@@ -593,70 +593,7 @@ export interface RolesRegistry {
   roles: RoleDef[];
 }
 
-/** main.questions.md 中一条 question 的结构(见 flowchart contract §6.3.3)。 */
-export interface FlowchartQuestion {
-  feature: string;
-  module: string;
-  question: string;
-  trigger: {
-    feature_path: string;
-    original_text: string;
-  };
-  proposed_resolution?: string;
-}
-
-/**
- * 决策者流程图(per-module 切分版)· 单个 module 的数据。
- * 对应文件 data/products/{id}/derived/flowcharts/by-module/{moduleId}.mmd
- */
-export interface ModuleFlowchartData {
-  moduleId: string;
-  moduleName: string;
-  moduleTitle: string | null;
-  /** 该模块下的 feature 总数(参考 — 帮 UI 显示) */
-  featureCount: number;
-  /** mmd 文件内容;exists=false 时为 null */
-  mermaid: string | null;
-  exists: boolean;
-  /** "%% 生成时间: <iso>" 头部或文件 mtime */
-  generated_at: string | null;
-  /** features/*.md 或 MODULE.md 的最大 mtime > .mmd mtime → stale */
-  stale: boolean;
-  stale_reason: string | null;
-}
-
-/**
- * 决策者流程图列表 + 聚合 questions。
- * 对应 GET /api/products/:id/flowcharts/by-module
- */
-export interface ModuleFlowchartListData {
-  /** 按 modules 顺序排列的每模块状态 */
-  modules: ModuleFlowchartData[];
-  /** 聚合 by-module/questions.md;空数组 = 无 questions */
-  questions: FlowchartQuestion[];
-  questions_lint_ok: boolean;
-  questions_lint_errors: string[];
-}
-
-/** GET /api/products/:id/flowchart 的响应 data 字段。 */
-export interface FlowchartData {
-  /** main.mmd 内容;exists=false 时为 null */
-  mermaid: string | null;
-  /** main.mmd 的"%% Generated at: <iso>"头部 / 退化到文件 mtime;不存在时 null */
-  generated_at: string | null;
-  /** main.mmd 是否存在 */
-  exists: boolean;
-  /** features/roles.yml 中是否有比 main.mmd 更新的 mtime */
-  stale: boolean;
-  /** stale=true 时说明是谁让它过期(featureId / "roles.yml") */
-  stale_reason: string | null;
-  /** main.questions.md 解析后的 question 数组;文件不存在或解析失败 → 空数组 */
-  questions: FlowchartQuestion[];
-  /** trigger lint 全部通过 → true;有一条失败 → false */
-  questions_lint_ok: boolean;
-  /** lint 失败条目的诊断;每条形如 "feature: xxx — trigger.original_text 在 feature_path 中 grep 不到" */
-  questions_lint_errors: string[];
-}
+// v0.1 rev3: 流程图 (Flowchart*) 全部类型已删 — 流程图功能在该版本被砍
 
 /** 设计文档:每个 feature 1:1 对应一个 markdown 文件 */
 export interface DesignSummary {
@@ -916,7 +853,7 @@ export interface EntityReconcileReport {
 }
 
 /**
- * 派生实体 question(`derived/entities/questions.md`),trigger 模式与 flowchart-contract §6.3 一致。
+ * 派生实体 question(`derived/entities/questions.md`),trigger 模式见 entity-contract §6.3。
  */
 export type EntityQuestionStatus = "pending" | "accepted" | "custom" | "rejected";
 

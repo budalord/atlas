@@ -12,7 +12,6 @@ import {
   buildEntityDerivePrompt,
   buildConventionsGeneratePrompt,
   buildPrototypeGeneratePrompt,
-  buildFlowchartGeneratePrompt,
   type GenerateScope
 } from "../services/generatePromptBuilder";
 
@@ -25,8 +24,7 @@ const GENERATE_SCOPES = new Set<GenerateScope>([
   "entity",
   "entity-derive",
   "conventions",
-  "prototype",
-  "flowchart"
+  "prototype"
 ]);
 
 /** GET /api/products/:id/revise-prompt?scope=feature|entity|prototype */
@@ -69,7 +67,6 @@ promptsRouter.get("/generate-prompt", async (req, res, next) => {
     else if (scope === "entity") result = await buildEntityGeneratePrompt(productId);
     else if (scope === "entity-derive") result = await buildEntityDerivePrompt(productId);
     else if (scope === "conventions") result = await buildConventionsGeneratePrompt(productId);
-    else if (scope === "flowchart") result = await buildFlowchartGeneratePrompt(productId);
     else result = await buildPrototypeGeneratePrompt(productId);
     res.json({ data: result, version: getDataVersion() });
   } catch (e) {

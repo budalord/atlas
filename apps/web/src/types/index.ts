@@ -47,11 +47,6 @@ export type {
   // 全局角色注册表(data/roles.yml)
   RoleDef,
   RolesRegistry,
-  // 流程图 derived 数据 (data/products/<id>/derived/flowcharts/)
-  FlowchartData,
-  FlowchartQuestion,
-  ModuleFlowchartData,
-  ModuleFlowchartListData,
   // 产品规格层(Layer 2)文件
   SpecFile,
   SpecFileKind,

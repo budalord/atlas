@@ -25,9 +25,10 @@ export async function renderMermaid(source: string, id: string) {
   }
 
   // 预处理:把节点 label 里 raw 的 `<<roles: ...>>` 转 HTML 实体。
-  // flowchart-contract §2.1 规定节点 label 形如 `[Entity].[action].[scope] <<roles: 中文角色名>>`,
+  // 历史上 Atlas 流程图节点 label 用过 `[Entity].[action].[scope] <<roles: 中文角色名>>` 格式,
   // 但 Mermaid 即使在 securityLevel:"loose" 下也会把 `<<...>>` 当成 HTML 元素并剥离内部内容
-  // (渲染结果显示 `<>` — `<<roles: 销售>>` 被吃成空 tag)。
+  // (渲染结果显示 `<>` — `<<roles: 销售>>` 被吃成空 tag)。 (v0.1 rev3 后流程图已删,
+  // 此预处理保留以防 md 中残留旧格式 Mermaid 块)
   //
   // 此预处理仅替换 `<<` / `>>` 两个分界标记为 HTML 实体,内容保留;同时把整段塞进 `["..."]`
   // 双引号(若 label 没有引号),避免 Mermaid 解析时把中文逗号当语法。

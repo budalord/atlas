@@ -13,7 +13,6 @@ import type {
 import { FeatureHoverCard } from "../FeatureHoverCard";
 import { FeatureModal } from "../FeatureModal";
 import { FeatureOverlapBanner } from "../FeatureOverlapBanner";
-import { FlowchartView } from "../FlowchartView";
 import { GlobalFeedbackPanel } from "../GlobalFeedbackPanel";
 import { PromptModalDialog, type PromptMode } from "../PromptModalDialog";
 import { UseCaseModal } from "../UseCaseModal";
@@ -61,7 +60,7 @@ interface HoveredFeature {
  *   - needs_revision=true 的功能点叶节点 content 末尾拼 " ⚠"
  *   - SSE data-change 时调 Markmap.setData() 增量更新(保留缩放/平移状态)
  */
-type ViewMode = "markmap" | "flowchart";
+// 视图切换 (markmap / flowchart) 在 v0.1 rev3 后简化为单视图 — markmap
 
 export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
   const [data, setData] = useState<ModuleWithFeatures[] | null>(null);
@@ -72,7 +71,6 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
   const [openFeature, setOpenFeature] = useState<FeatureRef | null>(null);
   const [openUseCase, setOpenUseCase] = useState<UseCaseRef | null>(null);
   const [rolesRegistry, setRolesRegistry] = useState<RolesRegistry | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("markmap");
   const [hovered, setHovered] = useState<HoveredFeature | null>(null);
   // hover 关闭定时器:鼠标离开节点 → 启动 → 移入卡片可取消
   const hoverCloseTimerRef = useRef<number | null>(null);
@@ -362,29 +360,7 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
 
   return (
     <div className="flex h-[calc(100vh-140px)] flex-col">
-      {/* 视图切换 — 功能点视图(markmap) / 流程图视图(derived,只读) */}
-      <div className="flex items-center gap-1 border-b border-slate-200 bg-slate-50 px-5 py-2 text-[12px]">
-        <ViewToggleButton
-          active={viewMode === "markmap"}
-          onClick={() => setViewMode("markmap")}
-        >
-          功能点视图
-        </ViewToggleButton>
-        <ViewToggleButton
-          active={viewMode === "flowchart"}
-          onClick={() => setViewMode("flowchart")}
-        >
-          流程图视图
-          <span className="ml-1 rounded bg-slate-200 px-1 py-0.5 text-[10px] font-normal text-slate-600">
-            derived
-          </span>
-        </ViewToggleButton>
-      </div>
-
-      {/* markmap 区始终挂载,切流程图时用 display:none 隐藏 —— 避免 React 卸载 SVG
-          导致 d3 zoom 在脱离 DOM 的 SVG 上读 SVGLength 抛错 + Markmap 实例需重建。
-          切回后 SVG 元素是同一个,Markmap 实例 + d3 状态都保留,布局立即可见。 */}
-      <div className={`flex min-h-0 flex-1 flex-col ${viewMode === "markmap" ? "" : "hidden"}`}>
+      <div className="flex min-h-0 flex-1 flex-col">
         <FeatureOverlapBanner productId={productId} readOnly={readOnly} />
         <GlobalFeedbackPanel productId={productId} scope="feature" />
         <div className="px-5 pt-3 pb-2 text-[11px] text-slate-500">
@@ -420,17 +396,8 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
           </button>
         </div>
       </div>
-      {viewMode === "flowchart" ? (
-        <FlowchartView
-          productId={productId}
-          onOpenFeature={(moduleId, featureId) =>
-            setOpenFeature({ moduleId, featureId })
-          }
-        />
-      ) : null}
-
-      {/* hover card 仅在 markmap 视图显示;开了 FeatureModal 就不再叠浮卡(避免视觉打架) */}
-      {viewMode === "markmap" && hovered && !openFeature ? (
+      {/* hover card; 开了 FeatureModal 就不再叠浮卡(避免视觉打架) */}
+      {hovered && !openFeature ? (
         <FeatureHoverCard
           productId={productId}
           moduleId={hovered.ref.moduleId}
@@ -487,30 +454,6 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
         />
       ) : null}
     </div>
-  );
-}
-
-function ViewToggleButton({
-  active,
-  onClick,
-  children
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      className={`rounded px-3 py-1 text-[12px] font-medium ${
-        active
-          ? "bg-slate-900 text-white"
-          : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-      }`}
-      onClick={onClick}
-    >
-      {children}
-    </button>
   );
 }
 
