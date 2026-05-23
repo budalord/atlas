@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   ApiEnvelope,
   DerivedEntitiesData,
   DerivedEntity,
   DerivedEntityQuestionsData,
-  EntityQuestion,
-  EntityReconcileReport
+  EntityQuestion
 } from "../../types";
 import { useDataChange } from "../../lib/useDataChange";
 import { GlobalFeedbackPanel } from "../GlobalFeedbackPanel";
@@ -17,15 +16,7 @@ interface EntityTabProps {
   readOnly?: boolean;
 }
 
-const NEW_BADGE_DAYS = 7;
-function isRecentlyDerived(generated_at: string | null): boolean {
-  if (!generated_at) return false;
-  const t = Date.parse(generated_at);
-  if (Number.isNaN(t)) return false;
-  return Date.now() - t < NEW_BADGE_DAYS * 86400 * 1000;
-}
-
-// agent 内部 bookkeeping question(归属表同步等) — feature 字段为 (cross) 表示不绑定具体 feature
+// agent 内部 bookkeeping question(归属表同步等)— feature 字段为 (cross) 表示不绑定具体 feature
 function isBookkeepingQuestion(q: EntityQuestion): boolean {
   return q.feature === "(cross)" || q.module === "(cross)";
 }
@@ -36,55 +27,33 @@ function stripDecisionMakerView(body: string): string {
   return body.replace(/^##\s+给决策者[\s\S]*?(?=^##\s+|\s*$(?![\s\S]))/m, "").trim();
 }
 
-// 实体需要决策者亲自审的判定 — 只看 schema 本身的 TBD 残缺
-// 业务决策不在这里判定: 该走顶部 question, 不该让实体卡变成决策入口
-function needsHumanReview(e: DerivedEntity): boolean {
-  if (e.layer === "[TBD]" || e.layer.includes("[TBD]")) return true;
-  if (e.maintainers === "[TBD]" || e.maintainers.includes("[TBD]")) return true;
-  // 字段表里有 [TBD] 标记 = agent 派生时缺数据, 走 question 之前先 flag 出来让你知道
-  if (/\[TBD\]/.test(stripDecisionMakerView(e.body))) return true;
-  return false;
-}
-
-function whyCritical(e: DerivedEntity): string {
-  const reasons: string[] = [];
-  if (e.layer.includes("[TBD]")) reasons.push("归属待定");
-  if (e.maintainers.includes("[TBD]")) reasons.push("维护人待定");
-  if (/\[TBD\]/.test(stripDecisionMakerView(e.body))) reasons.push("字段含 [TBD]");
-  return reasons.join(" · ");
-}
-
 /**
- * 实体 tab — 立项最后一道审查关(契约 §8)。
+ * 实体 tab — master-detail 视图。
  *
- * 派生即全部:
- *   - 由功能点 + SEAMS + DECISIONS + ENTITIES-OWNERSHIP + GLOBAL-FEEDBACK(entity) 派生
- *   - 不允许手写编辑(派生只读), 但审阅元数据(review-state.yml)与 question 决策可写
- *   - 全部实体已审 + 0 待决策 question → 解锁原型 tab
+ * 左侧 list 全部实体名 + layer + features count, 点击选中;
+ * 右侧 schema 视图(字段表 / 状态机 / 引用决策 / 引用接缝)。
+ *
+ * 决策入口统一在顶部 待决策 question 段, 实体卡本身不承载审核/决策。
  */
 export function EntityTab({ productId, readOnly = false }: EntityTabProps) {
   const [entitiesData, setEntitiesData] = useState<DerivedEntitiesData | null>(null);
   const [questionsData, setQuestionsData] = useState<DerivedEntityQuestionsData | null>(null);
-  const [reconcile, setReconcile] = useState<EntityReconcileReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [promptOpen, setPromptOpen] = useState(false);
+  const [selectedName, setSelectedName] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [r1, r2, r3] = await Promise.all([
+      const [r1, r2] = await Promise.all([
         fetch(`/api/products/${productId}/derived-entities`),
-        fetch(`/api/products/${productId}/derived-entities/questions`),
-        fetch(`/api/products/${productId}/derived-entities/reconcile`)
+        fetch(`/api/products/${productId}/derived-entities/questions`)
       ]);
       if (!r1.ok) throw new Error(`derived-entities ${r1.status}`);
       if (!r2.ok) throw new Error(`questions ${r2.status}`);
-      if (!r3.ok) throw new Error(`reconcile ${r3.status}`);
       const e = (await r1.json()) as ApiEnvelope<DerivedEntitiesData>;
       const q = (await r2.json()) as ApiEnvelope<DerivedEntityQuestionsData>;
-      const c = (await r3.json()) as ApiEnvelope<EntityReconcileReport>;
       setEntitiesData(e.data);
       setQuestionsData(q.data);
-      setReconcile(c.data);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载失败");
@@ -94,7 +63,7 @@ export function EntityTab({ productId, readOnly = false }: EntityTabProps) {
   useEffect(() => {
     setEntitiesData(null);
     setQuestionsData(null);
-    setReconcile(null);
+    setSelectedName(null);
     void load();
   }, [load]);
 
@@ -102,35 +71,35 @@ export function EntityTab({ productId, readOnly = false }: EntityTabProps) {
     void load();
   });
 
+  // 默认选中第一个实体
+  useEffect(() => {
+    if (selectedName !== null) return;
+    const first = entitiesData?.entities[0]?.name;
+    if (first) setSelectedName(first);
+  }, [entitiesData, selectedName]);
+
+  const allQuestions = questionsData?.questions ?? [];
+  const businessQuestions = useMemo(
+    () => allQuestions.filter((q) => !isBookkeepingQuestion(q)),
+    [allQuestions]
+  );
+  const bookkeepingQuestions = useMemo(
+    () => allQuestions.filter(isBookkeepingQuestion),
+    [allQuestions]
+  );
+  const pendingBusinessCount = businessQuestions.filter((q) => q.status === "pending").length;
+
   if (error) return <div className="p-5 text-sm text-rose-700">{error}</div>;
   if (entitiesData === null) return <div className="p-5 text-xs text-slate-500">加载中...</div>;
 
   const entities = entitiesData.entities;
-  const allQuestions = questionsData?.questions ?? [];
-  // 按 feature 字段区分业务 question vs 工程 question(agent 元决策)
-  const businessQuestions = allQuestions.filter((q) => !isBookkeepingQuestion(q));
-  const bookkeepingQuestions = allQuestions.filter(isBookkeepingQuestion);
-  const pendingBusinessQuestions = businessQuestions.filter((q) => q.status === "pending");
-  const pendingQuestions = allQuestions.filter((q) => q.status === "pending");
-
-  // 实体分组: 需要你拍 vs 机械映射
-  // 需要你拍 = 多 feature 合并 / layer-TBD / 缺给决策者段 / 字段含 TBD
-  const critical = entities.filter((e) => needsHumanReview(e));
-  const mechanical = entities.filter((e) => !needsHumanReview(e));
-  const criticalReviewed = critical.filter((e) => e.reviewedAt).length;
-  const allCriticalReviewed = critical.length === 0 || criticalReviewed === critical.length;
-  const totalEntities = entities.length;
-  const gatePassed = allCriticalReviewed && pendingBusinessQuestions.length === 0 && totalEntities > 0;
+  const selectedEntity = entities.find((e) => e.name === selectedName) ?? null;
 
   return (
-    <div className="flex min-h-0 flex-col overflow-auto">
-      <GateBanner
-        gatePassed={gatePassed}
-        criticalReviewed={criticalReviewed}
-        criticalTotal={critical.length}
-        mechanicalTotal={mechanical.length}
-        pendingBusiness={pendingBusinessQuestions.length}
-        hasEntities={totalEntities > 0}
+    <div className="flex min-h-0 flex-1 flex-col">
+      <SimpleBanner
+        entityCount={entities.length}
+        pendingBusinessCount={pendingBusinessCount}
       />
 
       <GlobalFeedbackPanel productId={productId} scope="entity" />
@@ -161,7 +130,7 @@ export function EntityTab({ productId, readOnly = false }: EntityTabProps) {
       {questionsData && questionsData.exists && bookkeepingQuestions.length > 0 ? (
         <details className="border-b border-slate-200 bg-slate-50/60">
           <summary className="cursor-pointer px-5 py-2 text-[11px] text-slate-600">
-            ▸ {bookkeepingQuestions.length} 个 agent 内部 bookkeeping question(归属表同步等, 通常 agent 自决, 仅在异常时展开)
+            ▸ {bookkeepingQuestions.length} 个 agent 内部 bookkeeping question(归属表同步等, 通常 agent 自决)
           </summary>
           <QuestionsSection
             productId={productId}
@@ -177,70 +146,16 @@ export function EntityTab({ productId, readOnly = false }: EntityTabProps) {
 
       {!entitiesData.exists ? (
         <EmptyState onOpenPrompt={() => setPromptOpen(true)} readOnly={readOnly} />
-      ) : null}
-
-      {reconcile && reconcile.exists ? (
-        <details className="border-b border-slate-200 bg-white px-5 py-2">
-          <summary className="cursor-pointer text-[12px] font-medium text-slate-700">
-            ▸ Reconcile 报告 · 派生 vs ENTITIES-OWNERSHIP
-            <span className="ml-2 text-[11px] font-normal text-slate-500">
-              派生有声明无 {reconcile.derivedOnly.length} · 声明有派生无 {reconcile.declaredOnly.length} · 归属不一致 {reconcile.layerMismatch.length}
-            </span>
-          </summary>
-          <div className="mt-2 grid grid-cols-1 gap-3 text-[12px] lg:grid-cols-3">
-            <ReconcileSection diffs={reconcile.derivedOnly} title="派生有声明无" tone="amber" />
-            <ReconcileSection diffs={reconcile.declaredOnly} title="声明有派生无" tone="slate" />
-            <ReconcileSection diffs={reconcile.layerMismatch} title="归属不一致" tone="rose" />
-          </div>
-        </details>
-      ) : null}
-
-      {critical.length > 0 ? (
-        <section className="mx-5 mt-5">
-          <header className="mb-2 flex items-center gap-2 text-[12px] font-medium text-slate-700">
-            <span className="inline-block h-2 w-2 rounded-full bg-amber-500" />
-            需要你拍 ({criticalReviewed}/{critical.length} 已审)
-            <span className="text-[11px] font-normal text-slate-500">
-              · 多 feature 合并 / 归属待定 / 字段有 [TBD] / 缺给决策者段
-            </span>
-          </header>
-          <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            {critical.map((entity) => (
-              <li key={entity.name}>
-                <EntityCard
-                  entity={entity}
-                  productId={productId}
-                  readOnly={readOnly}
-                  onChanged={() => void load()}
-                  pendingQuestionsCount={pendingQuestions.length}
-                  reason={whyCritical(entity)}
-                />
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
-      {mechanical.length > 0 ? (
-        <details className="mx-5 mt-4 mb-5 rounded-md border border-slate-200 bg-slate-50/60">
-          <summary className="cursor-pointer px-3 py-2 text-[12px] text-slate-700">
-            ▸ {mechanical.length} 个机械映射(1 个 feature 直推 · 默认通过, 不需要单独审)
-          </summary>
-          <ul className="grid grid-cols-1 gap-3 px-3 pb-3 lg:grid-cols-2">
-            {mechanical.map((entity) => (
-              <li key={entity.name}>
-                <EntityCard
-                  entity={entity}
-                  productId={productId}
-                  readOnly={readOnly}
-                  onChanged={() => void load()}
-                  pendingQuestionsCount={pendingQuestions.length}
-                />
-              </li>
-            ))}
-          </ul>
-        </details>
-      ) : null}
+      ) : (
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          <EntityList
+            entities={entities}
+            selectedName={selectedName}
+            onSelect={setSelectedName}
+          />
+          <EntityDetail entity={selectedEntity} />
+        </div>
+      )}
 
       {promptOpen ? (
         <PromptModalDialog
@@ -255,43 +170,27 @@ export function EntityTab({ productId, readOnly = false }: EntityTabProps) {
 }
 
 /* ============================================================
- *  立项 gate 横幅
+ *  顶部简单 banner — 只显示总数 + 待决策 question 数
  * ============================================================ */
-function GateBanner({
-  gatePassed,
-  criticalReviewed,
-  criticalTotal,
-  mechanicalTotal,
-  pendingBusiness,
-  hasEntities
+function SimpleBanner({
+  entityCount,
+  pendingBusinessCount
 }: {
-  gatePassed: boolean;
-  criticalReviewed: number;
-  criticalTotal: number;
-  mechanicalTotal: number;
-  pendingBusiness: number;
-  hasEntities: boolean;
+  entityCount: number;
+  pendingBusinessCount: number;
 }) {
-  if (!hasEntities) return null;
-  if (gatePassed) {
-    return (
-      <div className="border-b border-emerald-200 bg-emerald-50 px-5 py-2.5 text-[13px] font-medium text-emerald-900">
-        实体审查通过 (需要你拍 {criticalReviewed}/{criticalTotal} 已审 · {mechanicalTotal} 个机械映射自动通过 · 0 待决策 question) — 可进入原型 tab
-      </div>
-    );
-  }
-  const stillToReview = criticalTotal - criticalReviewed;
+  if (entityCount === 0) return null;
   return (
     <div className="border-b border-slate-200 bg-slate-50 px-5 py-2 text-[12px] text-slate-700">
-      立项审查进度: 已审 <span className="font-semibold text-slate-900">{criticalReviewed}</span> /{" "}
-      {criticalTotal} 需要你拍
-      {stillToReview > 0 ? <span> · 还需审 {stillToReview} 个</span> : null}
-      {mechanicalTotal > 0 ? (
-        <span className="text-slate-500"> · {mechanicalTotal} 个机械映射自动通过</span>
-      ) : null}
-      {pendingBusiness > 0 ? (
-        <span> · 待决策 <span className="font-semibold text-amber-700">{pendingBusiness}</span> 个 question</span>
-      ) : null}
+      <span className="font-semibold text-slate-900">{entityCount}</span> 个派生实体
+      {pendingBusinessCount > 0 ? (
+        <span className="ml-3">
+          · 待决策{" "}
+          <span className="font-semibold text-amber-700">{pendingBusinessCount}</span> 个 question
+        </span>
+      ) : (
+        <span className="ml-3 text-emerald-700">· 0 待决策 question</span>
+      )}
     </div>
   );
 }
@@ -309,17 +208,14 @@ function ToolBar({
   onOpenPrompt: () => void;
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-5 py-2">
-      <div className="text-[12px] text-slate-600">
+    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-5 py-2">
+      <div className="text-[11px] text-slate-500">
         {entitiesData.exists ? (
-          <>
-            <span className="font-medium text-slate-900">{entitiesData.entities.length}</span> 个派生实体
-            {entitiesData.generated_at ? (
-              <span className="ml-2 text-slate-500">· 生成于 {formatTime(entitiesData.generated_at)}</span>
-            ) : null}
-          </>
+          entitiesData.generated_at ? (
+            <span>生成于 {formatTime(entitiesData.generated_at)}</span>
+          ) : null
         ) : (
-          <span className="text-slate-500">尚无派生实体</span>
+          <span>尚无派生实体</span>
         )}
       </div>
       {!readOnly ? (
@@ -352,6 +248,120 @@ function EmptyState({ onOpenPrompt, readOnly }: { onOpenPrompt: () => void; read
           复制派生 prompt
         </button>
       ) : null}
+    </div>
+  );
+}
+
+/* ============================================================
+ *  实体列表(左侧 master) — 按 layer 分组, 点击切换
+ * ============================================================ */
+function EntityList({
+  entities,
+  selectedName,
+  onSelect
+}: {
+  entities: DerivedEntity[];
+  selectedName: string | null;
+  onSelect: (name: string) => void;
+}) {
+  // 按 layer 分组, layer 内按名字字典序
+  const groups = useMemo(() => {
+    const map = new Map<string, DerivedEntity[]>();
+    for (const e of entities) {
+      const k = e.layer || "[TBD]";
+      if (!map.has(k)) map.set(k, []);
+      map.get(k)!.push(e);
+    }
+    for (const arr of map.values()) arr.sort((a, b) => a.name.localeCompare(b.name));
+    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [entities]);
+
+  return (
+    <nav className="w-60 shrink-0 overflow-y-auto border-r border-slate-200 bg-slate-50">
+      {groups.map(([layer, group]) => (
+        <div key={layer}>
+          <div className="sticky top-0 border-b border-slate-200 bg-slate-100 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+            {layer}
+            <span className="ml-1 font-normal text-slate-400">{group.length}</span>
+          </div>
+          <ul>
+            {group.map((e) => (
+              <li key={e.name}>
+                <button
+                  className={`block w-full border-b border-slate-100 px-3 py-1.5 text-left text-[12px] font-mono leading-tight hover:bg-white ${
+                    selectedName === e.name
+                      ? "bg-white text-slate-900"
+                      : "text-slate-700"
+                  }`}
+                  onClick={() => onSelect(e.name)}
+                  type="button"
+                >
+                  {e.name}
+                  <div className="mt-0.5 font-sans text-[10px] text-slate-400">
+                    features × {e.sourceFeatures.length}
+                  </div>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </nav>
+  );
+}
+
+/* ============================================================
+ *  实体详情(右侧 detail) — 纯 schema 视图
+ * ============================================================ */
+function EntityDetail({ entity }: { entity: DerivedEntity | null }) {
+  if (!entity) {
+    return (
+      <div className="flex flex-1 items-center justify-center text-[12px] text-slate-400">
+        从左侧选一个实体查看 schema
+      </div>
+    );
+  }
+  const schemaBody = stripDecisionMakerView(entity.body);
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto bg-white">
+      <header className="border-b border-slate-200 px-5 py-3">
+        <div className="flex items-baseline gap-2">
+          <span className="font-mono text-[16px] font-semibold text-slate-900">
+            {entity.name}
+          </span>
+          <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-600">
+            {entity.layer}
+          </span>
+        </div>
+        <div className="mt-1 text-[11px] text-slate-500">
+          维护: {entity.maintainers} · features × {entity.sourceFeatures.length}
+          {entity.sourceSeams.length > 0 ? ` · seams × ${entity.sourceSeams.length}` : ""}
+          {entity.sourceDecisions.length > 0
+            ? ` · decisions × ${entity.sourceDecisions.length}`
+            : ""}
+        </div>
+      </header>
+
+      <div className="px-5 py-4">
+        <div className="prose prose-sm max-w-none text-[12px]">
+          <MarkdownRenderer markdown={schemaBody} />
+        </div>
+        {entity.sourceFeatures.length > 0 ? (
+          <div className="mt-4 border-t border-slate-200 pt-3 text-[11px]">
+            <div className="text-slate-500">来源 features:</div>
+            <div className="mt-1 flex flex-wrap gap-1">
+              {entity.sourceFeatures.map((f) => (
+                <code
+                  key={f}
+                  className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-700"
+                >
+                  {f}
+                </code>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -577,172 +587,6 @@ function QuestionRow({
         ) : null}
       </div>
     </li>
-  );
-}
-
-/* ============================================================
- *  实体卡片 · 决策者审阅视图
- * ============================================================ */
-function EntityCard({
-  entity,
-  productId,
-  readOnly,
-  onChanged,
-  pendingQuestionsCount: _pendingQuestionsCount,
-  reason
-}: {
-  entity: DerivedEntity;
-  productId: string;
-  readOnly: boolean;
-  onChanged: () => void;
-  pendingQuestionsCount: number;
-  reason?: string;
-}) {
-  const [submitting, setSubmitting] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  const isNew = !entity.reviewedAt && isRecentlyDerived(entity.generated_at);
-  const reviewed = Boolean(entity.reviewedAt);
-  const schemaBody = stripDecisionMakerView(entity.body);
-
-  const toggleReview = async () => {
-    setSubmitting(true);
-    setErr(null);
-    try {
-      const res = await fetch(
-        `/api/products/${productId}/derived-entities/${encodeURIComponent(entity.name)}/review`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: reviewed ? "unmark" : "mark" })
-        }
-      );
-      if (!res.ok) {
-        const b = await res.json().catch(() => ({}));
-        throw new Error(b.error ?? `HTTP ${res.status}`);
-      }
-      onChanged();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "操作失败");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <div
-      className={`rounded-md border bg-white shadow-sm ${
-        reviewed ? "border-emerald-200" : "border-slate-200"
-      }`}
-    >
-      <header className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-2.5">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="font-mono text-[14px] font-semibold text-slate-900">{entity.name}</span>
-            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
-              {entity.layer}
-            </span>
-            {isNew ? (
-              <span
-                className="rounded border border-sky-300 bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium text-sky-700"
-                title="7 天内派生, 尚未审"
-              >
-                <span style={{fontSize: "10px"}}>新</span>
-              </span>
-            ) : null}
-            {reviewed ? (
-              <span
-                className="rounded border border-emerald-300 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-800"
-                title={`审阅人: ${entity.reviewedBy ?? "unknown"} · ${entity.reviewedAt ?? ""}`}
-              >
-                已审
-              </span>
-            ) : null}
-          </div>
-          <div className="mt-0.5 text-[11px] text-slate-500">
-            维护: {entity.maintainers} · features × {entity.sourceFeatures.length}
-            {entity.sourceSeams.length > 0 ? ` · seams × ${entity.sourceSeams.length}` : ""}
-            {entity.sourceDecisions.length > 0 ? ` · decisions × ${entity.sourceDecisions.length}` : ""}
-          </div>
-          {reason ? (
-            <div className="mt-1 text-[10px] text-amber-700">为什么需要你拍: {reason}</div>
-          ) : null}
-        </div>
-        {!readOnly ? (
-          <button
-            className={`shrink-0 rounded border px-2.5 py-1 text-[11px] font-medium disabled:opacity-50 ${
-              reviewed
-                ? "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
-                : "border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700"
-            }`}
-            disabled={submitting}
-            onClick={() => void toggleReview()}
-            type="button"
-          >
-            {submitting ? "..." : reviewed ? "取消已审" : "标已审"}
-          </button>
-        ) : null}
-      </header>
-
-      {err ? (
-        <div className="border-b border-rose-100 bg-rose-50 px-4 py-1.5 text-[11px] text-rose-700">
-          {err}
-        </div>
-      ) : null}
-
-      {/* 纯 schema 视图: 字段 / 状态机 / 权限 / 引用决策 / 引用接缝 — 决策走顶部 question */}
-      <div className="px-4 py-3">
-        <div className="prose prose-sm max-w-none text-[12px]">
-          <MarkdownRenderer markdown={schemaBody} />
-        </div>
-      </div>
-
-      <footer className="flex items-center justify-end border-t border-slate-100 px-4 py-1.5 text-[10px] text-slate-400">
-        {entity.generated_at ? formatTime(entity.generated_at) : ""}
-      </footer>
-    </div>
-  );
-}
-
-/* ============================================================
- *  Reconcile section
- * ============================================================ */
-function ReconcileSection({
-  title,
-  diffs,
-  tone
-}: {
-  title: string;
-  diffs: EntityReconcileReport["derivedOnly"];
-  tone: "amber" | "slate" | "rose";
-}) {
-  const toneCls = {
-    amber: "border-amber-200 bg-amber-50/40",
-    slate: "border-slate-200 bg-slate-50",
-    rose: "border-rose-200 bg-rose-50/40"
-  }[tone];
-  return (
-    <div className={`rounded-md border px-3 py-2 ${toneCls}`}>
-      <div className="text-[12px] font-medium text-slate-900">
-        {title}{" "}
-        <span className="text-[10px] font-normal text-slate-500">({diffs.length})</span>
-      </div>
-      {diffs.length === 0 ? (
-        <div className="mt-1 text-[11px] italic text-slate-400">—</div>
-      ) : (
-        <ul className="mt-1 space-y-1">
-          {diffs.map((d, i) => (
-            <li className="text-[11px] leading-5" key={i}>
-              <span className="font-mono font-semibold text-slate-800">{d.name}</span>
-              {d.declaredLayer ? <span className="ml-1 text-slate-500">·声明:{d.declaredLayer}</span> : null}
-              {d.derivedLayer ? <span className="ml-1 text-slate-500">·派生:{d.derivedLayer}</span> : null}
-              {d.derivedNote ? <span className="ml-1 text-slate-600">·{d.derivedNote}</span> : null}
-              {d.suggestion ? <div className="text-slate-600">{d.suggestion}</div> : null}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
   );
 }
 
