@@ -197,6 +197,11 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
       mmRef.current = null;
       mmSvgRef.current = null;
     }
+    // 关键: setData 前先从当前 SVG 上 snapshot 折叠状态写到 foldStateRef
+    // 这样即便用户没主动点过 toggle circle, 也能保留 initialExpandLevel 之外用户的展开/折叠改动
+    if (mmRef.current) {
+      snapshotFoldState(svg, foldStateRef.current);
+    }
     // 用户已有折叠偏好 → 写入 tree.payload.fold, 让 markmap 渲染时遵循
     const patchedTree = applyFoldState(JSON.parse(JSON.stringify(tree)), foldStateRef.current);
     if (!mmRef.current) {
