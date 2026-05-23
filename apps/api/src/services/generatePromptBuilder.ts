@@ -9,6 +9,7 @@ import { parseGlobalFeedbackFile } from "./globalFeedbackParser";
 import { loadActors } from "./actorLoader";
 import { loadCapabilities, attachCapabilityRefs } from "./capabilityLoader";
 import { loadUseCases } from "./usecaseLoader";
+import { DECISION_MAKER_VIEW_GUIDE } from "./revisePromptBuilder";
 
 export interface FeatureGenerateStats {
   has_description: boolean;
@@ -156,7 +157,11 @@ Project
 2. **等用户确认后再实际写文件**(用 Edit/Write 工具)
 3. 严格遵守输出约定
 4. 新建文件不加 needs_revision 标签
+5. 每个 function 都必须写 \`## 给决策者\` 段, **严格按下方写作规范**, 三段格式 + 不出现 schema 黑话
 `,
+    "",
+    DECISION_MAKER_VIEW_GUIDE,
+    "",
     warning,
     "## 当前已知信息",
     describeProduct(meta, productId),
@@ -655,6 +660,10 @@ ${rolesList}`,
     "## 必读 · entity-contract 全文 (inline)",
     "",
     contractText,
+    "",
+    "---",
+    "",
+    DECISION_MAKER_VIEW_GUIDE,
     "",
     "---",
     "",
