@@ -94,6 +94,22 @@ const FEATURE_FOOTER = (productId: string) => `## 注意事项
 - 如果反馈让你做"新增 feature"的事,在新位置 data/products/${productId}/modules/{moduleId}/features/{newId}.md 创建文件
   * frontmatter 必须包含 id, name, module, created_at
   * 新文件 needs_revision 不要写(新建即基线,无需修订)
+
+## ⚠ 新建 feature 前必读 · 去重检查
+
+立项阶段一个产品常出现"同一动作被多个 feature 描述"导致实体派生时噪音。新建 feature 前 **必须** 先扫:
+
+1. **同 module 下 entities_touched 重合 ≥ 70%** 的现存 feature
+   - 例: 新 feature 触及 [Refund, Order, Payment], 已有 \`refund-application\` 触及 [Refund, Order, Payment, User] → 重合 75%, **可能是同一件事的不同切面**
+2. **同 module 下 name 相似度高** 的 feature
+   - 同动词(退费 / 退款 / 退订) / 同实体名(学员 / 订单) / 子串包含
+3. **同 module_group 下的兄弟节点**(管理模块级别本来就该高内聚)
+
+扫到候选 → 在 diff plan 里**明确说**:
+- "我把 X 合并到已有的 Y, 因为 ... " (描述合并理由 + 把新 feature 的反馈内容并入 Y 的字段权限 / 状态分支 / 字段清单), 或
+- "我新建 X, 因为它跟 Y 在 actor / 状态机 / 字段权限上有本质区别 — 具体: ... " (描述区分点)
+
+**没写说明 → 不允许新建。** 默认行为是合并到已有 feature。
 `;
 
 const ENTITY_FOOTER = (productId: string) => `## 注意事项

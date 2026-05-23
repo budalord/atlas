@@ -714,6 +714,16 @@ ENTITIES-OWNERSHIP / GLOBAL-FEEDBACK[entity 段] + questions-decisions.yml),产�
 7. **每个 entity md body 必须含 \`## 给决策者\` H2 段**(见契约 §3.3) — 1-3 句白话,综合 features + ENTITIES-OWNERSHIP + DECISIONS 描述"这是什么 / 谁维护 / 关键约束"。不写技术黑话(不写 PK/FK/索引), 决策者审阅视角。
 8. 当前生成时间(写入 generated_at): ${today}
 
+## ⚠ 多 feature 描述同一动作 → 不要派生为不同 Entity
+
+立项阶段 features 集合常有"同一动作的多个切面"(actor 不同 / 触发点不同 / 数据范围不同, 但本质操作同一实体)。例:
+- \`refund-application(销售发起入口)\` + \`refund-three-party\` + \`refund-batch-import\` → 派生为同一个 Refund 实体, 用**字段权限**区分 actor, 用**状态机分支**区分流程
+
+判别原则:
+1. entities_touched 重合 ≥ 70% 的多个 features → 合并派生到同一 Entity, 在 Entity 的字段权限 / 状态机分支体现差异
+2. 不同 features 触及同一主体实体 → sourceFeatures 列表合并, 一个 Entity 多个 sourceFeatures 是正常的
+3. **不要**为了 features 数量平衡而拆 Entity — 一个 Refund 实体覆盖 N 个退费 features 比 N 个 RefundXxx 实体好
+
 ## ⚠ 消化决策者已拍板的决策(对偶 entity-contract §2.5)
 
 下方 "全局需求池(entity 段)" + "questions-decisions.yml" 是决策者上一轮对 questions.md 的决策结果:
