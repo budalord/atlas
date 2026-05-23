@@ -25,34 +25,26 @@ export type TabMode = "read-write" | "read-only";
 const TABS_BY_PHASE: Record<ProductPhase, Array<{ key: TabKey; mode: TabMode }>> = {
   planning: [
     { key: "overview", mode: "read-write" },
-    { key: "spec", mode: "read-write" },
     { key: "features", mode: "read-write" },
     { key: "entities", mode: "read-write" },
-    { key: "conventions", mode: "read-write" },
     { key: "design", mode: "read-write" }
   ],
   "in-progress": [
     { key: "overview", mode: "read-write" },
-    { key: "spec", mode: "read-write" },
     { key: "features", mode: "read-write" },
     { key: "entities", mode: "read-write" },
-    { key: "conventions", mode: "read-write" },
     { key: "design", mode: "read-only" }
   ],
   live: [
     { key: "overview", mode: "read-only" },
-    { key: "spec", mode: "read-only" },
     { key: "features", mode: "read-only" },
     { key: "entities", mode: "read-only" },
-    { key: "conventions", mode: "read-only" },
     { key: "design", mode: "read-only" }
   ],
   paused: [
     { key: "overview", mode: "read-only" },
-    { key: "spec", mode: "read-only" },
     { key: "features", mode: "read-only" },
-    { key: "entities", mode: "read-only" },
-    { key: "conventions", mode: "read-only" }
+    { key: "entities", mode: "read-only" }
   ],
   archived: [
     { key: "overview", mode: "read-only" },
@@ -61,11 +53,11 @@ const TABS_BY_PHASE: Record<ProductPhase, Array<{ key: TabKey; mode: TabMode }>>
 };
 
 export const TAB_LABELS: Record<TabKey, string> = {
-  features: "功能点",
+  features: "功能与用例",
   overview: "概览",
-  spec: "规格",
+  spec: "规格",          // v0.1 rev3 隐藏, label 保留供升级回滚
   entities: "实体",
-  conventions: "L0 规范",
+  conventions: "L0 规范",  // v0.1 rev3 隐藏, label 保留供升级回滚
   design: "双轨设计"
 };
 

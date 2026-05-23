@@ -83,5 +83,17 @@ export type {
   L0ViolationsData,
   // Feature 重叠检测
   OverlapGroup,
-  OverlapReport
+  OverlapReport,
+  // v0.1 rev3 五层骨架
+  Actor,
+  ActorType,
+  ActorSource,
+  ActorWithRefs,
+  Capability,
+  CapabilityStatus,
+  CapabilityPriority,
+  CapabilitySource,
+  CapabilityWithRefs,
+  UseCase,
+  ReferenceIntegrityIssue
 } from "@atlas/shared";

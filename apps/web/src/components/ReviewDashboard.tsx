@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { useDataChange } from "../lib/useDataChange";
 import type {
+  ActorWithRefs,
   ApiEnvelope,
+  CapabilityWithRefs,
   DerivedEntitiesData,
   DerivedEntityQuestionsData,
   GlobalFeedbackData,
   L0ViolationsData,
-  ModuleWithFeatures
+  ModuleWithFeatures,
+  UseCase
 } from "../types";
 
 interface ReviewDashboardProps {
@@ -14,11 +17,14 @@ interface ReviewDashboardProps {
 }
 
 interface DashboardData {
-  features: { total: number; reviewed: number; needsRevision: number; feedbackCount: number };
+  actors: { total: number };
+  capabilities: { total: number; confirmed: number; draft: number };
+  usecases: { total: number };
+  features: { total: number; reviewed: number; needsRevision: number; feedbackCount: number; missingCapability: number };
   entities: { total: number; reviewed: number; missingDecisionMakerView: number };
   questions: { total: number; pending: number; decided: number };
   globalFeedback: { feature: number; entity: number; prototype: number };
-  l0: { violations: number; exists: boolean };
+  l0: { violations: number; refIntegrityViolations: number; exists: boolean };
 }
 
 /**
@@ -43,12 +49,15 @@ export function ReviewDashboard({ productId }: ReviewDashboardProps) {
 
   const load = useCallback(async () => {
     try {
-      const [fRes, eRes, qRes, gRes, lRes] = await Promise.all([
+      const [fRes, eRes, qRes, gRes, lRes, aRes, cRes, uRes] = await Promise.all([
         fetch(`/api/products/${productId}/modules-with-features`),
         fetch(`/api/products/${productId}/derived-entities`),
         fetch(`/api/products/${productId}/derived-entities/questions`),
         fetch(`/api/products/${productId}/global-feedback`),
-        fetch(`/api/products/${productId}/l0-violations`)
+        fetch(`/api/products/${productId}/l0-violations`),
+        fetch(`/api/products/${productId}/actors`),
+        fetch(`/api/products/${productId}/capabilities`),
+        fetch(`/api/products/${productId}/usecases`)
       ]);
       if (!fRes.ok) throw new Error(`modules-with-features ${fRes.status}`);
       const fJson = (await fRes.json()) as ApiEnvelope<ModuleWithFeatures[]>;
@@ -56,13 +65,18 @@ export function ReviewDashboard({ productId }: ReviewDashboardProps) {
       const qJson = qRes.ok ? ((await qRes.json()) as ApiEnvelope<DerivedEntityQuestionsData>) : null;
       const gJson = gRes.ok ? ((await gRes.json()) as ApiEnvelope<GlobalFeedbackData>) : null;
       const lJson = lRes.ok ? ((await lRes.json()) as ApiEnvelope<L0ViolationsData>) : null;
+      const aJson = aRes.ok ? ((await aRes.json()) as ApiEnvelope<ActorWithRefs[]>) : null;
+      const cJson = cRes.ok ? ((await cRes.json()) as ApiEnvelope<CapabilityWithRefs[]>) : null;
+      const uJson = uRes.ok ? ((await uRes.json()) as ApiEnvelope<UseCase[]>) : null;
 
       const allFeatures = fJson.data.flatMap((m) => m.features);
       const features = {
         total: allFeatures.length,
         reviewed: allFeatures.filter((f) => f.reviewed_at).length,
         needsRevision: allFeatures.filter((f) => f.needs_revision).length,
-        feedbackCount: allFeatures.reduce((s, f) => s + (f.feedbackCount ?? 0), 0)
+        feedbackCount: allFeatures.reduce((s, f) => s + (f.feedbackCount ?? 0), 0),
+        // FeaturePointPreview 不直接含 capability_id, 但全 features API 输出含 — 这里用 0 作占位, 实际由 l0 lint 覆盖检测
+        missingCapability: 0
       };
 
       const entitiesArr = eJson?.data.entities ?? [];
@@ -86,12 +100,28 @@ export function ReviewDashboard({ productId }: ReviewDashboardProps) {
         prototype: gd.prototype.length
       };
 
+      const refIntegrityViolations = (lJson?.data.violations ?? []).filter(
+        (v) => v.category === "invalid-reference"
+      ).length;
       const l0 = {
         violations: lJson?.data.violations.length ?? 0,
+        refIntegrityViolations,
         exists: Boolean(lJson?.data.exists)
       };
 
-      setData({ features, entities, questions, globalFeedback, l0 });
+      const actorList = aJson?.data ?? [];
+      const capList = cJson?.data ?? [];
+      const ucList = uJson?.data ?? [];
+
+      const actors = { total: actorList.length };
+      const capabilities = {
+        total: capList.length,
+        confirmed: capList.filter((c) => c.status === "confirmed").length,
+        draft: capList.filter((c) => c.status === "draft").length
+      };
+      const usecases = { total: ucList.length };
+
+      setData({ actors, capabilities, usecases, features, entities, questions, globalFeedback, l0 });
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载失败");
@@ -125,8 +155,9 @@ export function ReviewDashboard({ productId }: ReviewDashboardProps) {
   const featureGate = data.features.total > 0 && data.features.needsRevision === 0;
   const entityGate =
     data.entities.total > 0 && data.entities.reviewed === data.entities.total && data.questions.pending === 0;
-  const l0Gate = data.l0.violations === 0;
-  const allPass = featureGate && entityGate && l0Gate;
+  const fiveSkeletonGate = data.actors.total > 0 && data.capabilities.total > 0; // 五层骨架存在
+  const refIntegrityGate = data.l0.refIntegrityViolations === 0;
+  const allPass = featureGate && entityGate && fiveSkeletonGate && refIntegrityGate;
 
   return (
     <div
@@ -142,7 +173,27 @@ export function ReviewDashboard({ productId }: ReviewDashboardProps) {
         )}
 
         <DashItem
-          label="功能点"
+          label="Actor"
+          primary={`${data.actors.total}`}
+          tone={data.actors.total === 0 ? "warn" : "info"}
+          hint={data.actors.total === 0 ? "未建 actor 池 (五层骨架不完整)" : null}
+        />
+
+        <DashItem
+          label="Capability"
+          primary={`${data.capabilities.confirmed}/${data.capabilities.total}`}
+          tone={
+            data.capabilities.total === 0
+              ? "warn"
+              : data.capabilities.confirmed === data.capabilities.total
+                ? "ok"
+                : "info"
+          }
+          hint={data.capabilities.draft > 0 ? `${data.capabilities.draft} 个 draft 待确认` : null}
+        />
+
+        <DashItem
+          label="Function"
           primary={`${data.features.reviewed}/${data.features.total}`}
           tone={
             data.features.total === 0
@@ -157,9 +208,16 @@ export function ReviewDashboard({ productId }: ReviewDashboardProps) {
             data.features.needsRevision > 0
               ? `${data.features.needsRevision} 个 ⚠ 待 agent 重做`
               : data.features.feedbackCount > 0
-                ? `${data.features.feedbackCount} 条反馈待处理`
+                ? `${data.features.feedbackCount} 条反馈`
                 : null
           }
+        />
+
+        <DashItem
+          label="UseCase"
+          primary={`${data.usecases.total}`}
+          tone={data.usecases.total === 0 ? "muted" : "info"}
+          hint={null}
         />
 
         <DashItem
@@ -203,7 +261,11 @@ export function ReviewDashboard({ productId }: ReviewDashboardProps) {
           label="L0 违规"
           primary={data.l0.exists ? `${data.l0.violations}` : "—"}
           tone={!data.l0.exists ? "muted" : data.l0.violations === 0 ? "ok" : "warn"}
-          hint={null}
+          hint={
+            data.l0.refIntegrityViolations > 0
+              ? `引用残缺 ${data.l0.refIntegrityViolations}`
+              : null
+          }
         />
       </div>
     </div>
