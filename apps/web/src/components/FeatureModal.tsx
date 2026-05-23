@@ -114,18 +114,34 @@ export function FeatureModal({
               ) : (
                 <span className="rounded bg-slate-100 px-1.5 py-0.5">{moduleId}</span>
               )}
-              {feature?.module_group ? (
+              {feature?.capability_id ? (
                 <>
                   <span className="text-slate-300">›</span>
                   <span
-                    className="rounded bg-indigo-50 px-1.5 py-0.5 text-indigo-700"
-                    title={`管理模块 id: ${feature.module_group}`}
+                    className="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-800"
+                    title={`Capability: ${feature.capability_id}`}
                   >
-                    {(moduleSpec?.groups ?? []).find((g) => g.id === feature.module_group)?.name
-                      ?? `${feature.module_group} ⚠`}
+                    🎯 {feature.capability_id}
                   </span>
                 </>
-              ) : null}
+              ) : feature?.module_group ? (
+                <>
+                  <span className="text-slate-300">›</span>
+                  <span
+                    className="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700"
+                    title={`旧字段 module_group (v0.0): ${feature.module_group}, 应迁移到 capability_id`}
+                  >
+                    ⚠ {feature.module_group}
+                  </span>
+                </>
+              ) : (
+                <span
+                  className="rounded bg-rose-50 px-1.5 py-0.5 text-rose-700"
+                  title="未归属任何 Capability — l0 警告"
+                >
+                  ⚠ 未归属
+                </span>
+              )}
               <span className="font-mono text-slate-400">{featureId}</span>
               {feature?.reviewed_at ? (
                 <span

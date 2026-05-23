@@ -2,13 +2,21 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Markmap } from "markmap-view";
 import type { IPureNode } from "markmap-common";
 import { useDataChange } from "../../lib/useDataChange";
-import type { ApiEnvelope, FeaturePointPreview, ModuleWithFeatures, RolesRegistry } from "../../types";
+import type {
+  ApiEnvelope,
+  CapabilityWithRefs,
+  FeaturePointPreview,
+  ModuleWithFeatures,
+  RolesRegistry,
+  UseCase
+} from "../../types";
 import { FeatureHoverCard } from "../FeatureHoverCard";
 import { FeatureModal } from "../FeatureModal";
 import { FeatureOverlapBanner } from "../FeatureOverlapBanner";
 import { FlowchartView } from "../FlowchartView";
 import { GlobalFeedbackPanel } from "../GlobalFeedbackPanel";
 import { PromptModalDialog, type PromptMode } from "../PromptModalDialog";
+import { UseCaseModal } from "../UseCaseModal";
 
 /** 7 天内创建且未审阅 → 🆕 徽章 */
 const NEW_BADGE_DAYS = 7;
@@ -31,6 +39,12 @@ interface FeatureRef {
   featureId: string;
 }
 
+interface UseCaseRef {
+  module: string;
+  function_id: string;
+  usecase_id: string;
+}
+
 interface HoveredFeature {
   ref: FeatureRef;
   preview: FeaturePointPreview;
@@ -51,9 +65,12 @@ type ViewMode = "markmap" | "flowchart";
 
 export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
   const [data, setData] = useState<ModuleWithFeatures[] | null>(null);
+  const [capabilities, setCapabilities] = useState<CapabilityWithRefs[]>([]);
+  const [usecases, setUsecases] = useState<UseCase[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [productName, setProductName] = useState<string>("");
   const [openFeature, setOpenFeature] = useState<FeatureRef | null>(null);
+  const [openUseCase, setOpenUseCase] = useState<UseCaseRef | null>(null);
   const [rolesRegistry, setRolesRegistry] = useState<RolesRegistry | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("markmap");
   const [hovered, setHovered] = useState<HoveredFeature | null>(null);
@@ -78,9 +95,11 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
 
   const loadList = async () => {
     try {
-      const [modsRes, prodRes] = await Promise.all([
+      const [modsRes, prodRes, capsRes, ucsRes] = await Promise.all([
         fetch(`/api/products/${productId}/modules-with-features`),
-        fetch(`/api/products/${productId}`)
+        fetch(`/api/products/${productId}`),
+        fetch(`/api/products/${productId}/capabilities`),
+        fetch(`/api/products/${productId}/usecases`)
       ]);
       if (!modsRes.ok) throw new Error(`${modsRes.status}`);
       const modsJson = (await modsRes.json()) as ApiEnvelope<ModuleWithFeatures[]>;
@@ -88,6 +107,18 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
       if (prodRes.ok) {
         const prodJson = (await prodRes.json()) as ApiEnvelope<{ meta: { name: string } }>;
         setProductName(prodJson.data.meta.name);
+      }
+      if (capsRes.ok) {
+        const capsJson = (await capsRes.json()) as ApiEnvelope<CapabilityWithRefs[]>;
+        setCapabilities(capsJson.data);
+      } else {
+        setCapabilities([]);
+      }
+      if (ucsRes.ok) {
+        const ucsJson = (await ucsRes.json()) as ApiEnvelope<UseCase[]>;
+        setUsecases(ucsJson.data);
+      } else {
+        setUsecases([]);
       }
       setError(null);
     } catch (e) {
@@ -131,8 +162,12 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
   const tree = useMemo<IPureNode | null>(() => {
     if (!data) return null;
     if (data.length === 0) return null;
+    // v0.1 rev3: 有 capability 时走 5 层骨架视图(domain→capability→function→usecase), 否则退化到旧 3 层
+    if (capabilities.length > 0) {
+      return buildTreeV2(productName || productId, capabilities, data, usecases, roleIdToName);
+    }
     return buildTree(productName || productId, data, roleIdToName);
-  }, [data, productId, productName, roleIdToName]);
+  }, [data, capabilities, usecases, productId, productName, roleIdToName]);
 
   // 初始化 / 更新 Markmap 实例。
   // SVG 容器始终挂载(切流程图视图用 CSS display:none),所以 Markmap 实例 + d3 状态
@@ -207,6 +242,18 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
       return datum?.payload?.featureRef ?? null;
     };
 
+    const findUseCaseRefAt = (target: Element | null): UseCaseRef | null => {
+      let el = target;
+      while (el && el !== svg) {
+        if (el.classList && el.classList.contains("markmap-node")) break;
+        el = el.parentElement;
+      }
+      if (!el || el === svg) return null;
+      const datum = (el as unknown as { __data__?: { payload?: { usecaseRef?: UseCaseRef } } })
+        .__data__;
+      return datum?.payload?.usecaseRef ?? null;
+    };
+
     const lookupPreview = (ref: FeatureRef): FeaturePointPreview | null => {
       const mods = dataRef.current;
       if (!mods) return null;
@@ -225,6 +272,14 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
       // markmap-view circle 是折叠/展开控件,放过
       const target = e.target as Element;
       if (target && target.tagName === "circle") return;
+      // 先检 usecase, 再检 feature(usecase 节点也是叶, 但 payload 不同)
+      const ucRef = findUseCaseRefAt(target);
+      if (ucRef) {
+        cancelHoverClose();
+        setHovered(null);
+        setOpenUseCase(ucRef);
+        return;
+      }
       const ref = findFeatureRefAt(target);
       if (ref) {
         cancelHoverClose();
@@ -414,6 +469,15 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
           readOnly={readOnly}
         />
       ) : null}
+      {openUseCase ? (
+        <UseCaseModal
+          functionId={openUseCase.function_id}
+          usecaseId={openUseCase.usecase_id}
+          module={openUseCase.module}
+          onClose={() => setOpenUseCase(null)}
+          productId={productId}
+        />
+      ) : null}
       {promptOpen ? (
         <PromptModalDialog
           mode={promptOpen}
@@ -547,6 +611,142 @@ function buildModuleNode(
         children: features.map((f) => buildFeatureNode(f, mw.module.name, roleIdToName))
       };
     })
+  };
+}
+
+/**
+ * v0.1 rev3 五层骨架 markmap 树构建:
+ *   root (产品名)
+ *   └─ domain (招生 · 5 capability · 2 P0)        ← 含聚合徽章
+ *      └─ capability (学员录入 · P0 · ✅confirmed)
+ *         └─ function (= 当前 feature, 保留原徽章 🆕/✅/💬/⚠)
+ *            └─ usecase (含 actor 标签, 仅有 usecase 时展开)
+ *
+ * 优雅退化:
+ *   - 没有 capability_id 的 function 归入虚拟 capability "未归属(_orphan)" + domain "未归类"
+ */
+function buildTreeV2(
+  productName: string,
+  capabilities: CapabilityWithRefs[],
+  modules: ModuleWithFeatures[],
+  usecases: UseCase[],
+  roleIdToName: Map<string, string>
+): IPureNode {
+  // 收集所有 functions(扁平化)
+  const allFunctions = modules.flatMap((m) =>
+    m.features.map((f) => ({ feature: f, moduleId: m.module.name }))
+  );
+
+  // function.id → capability_id (取自 capability.function_ids 反向聚合)
+  const fnIdToCap = new Map<string, string>();
+  for (const cap of capabilities) {
+    for (const fid of cap.function_ids) {
+      fnIdToCap.set(fid, cap.id);
+    }
+  }
+
+  // 按 domain 分组
+  const byDomain = new Map<string, CapabilityWithRefs[]>();
+  for (const cap of capabilities) {
+    if (!byDomain.has(cap.domain)) byDomain.set(cap.domain, []);
+    byDomain.get(cap.domain)!.push(cap);
+  }
+
+  // 未归属 function (没有 capability_id 的)
+  const orphanFunctions = allFunctions.filter(({ feature }) => !fnIdToCap.has(feature.id));
+
+  const domainNodes: IPureNode[] = [];
+  for (const [domain, caps] of byDomain.entries()) {
+    const p0Count = caps.filter((c) => c.priority === "P0").length;
+    const label =
+      `<span style="font-weight:700;font-size:1.05em">${escapeHtml(domain)}</span>` +
+      ` <span style="color:#94a3b8;font-size:0.85em">· ${caps.length} capability${p0Count > 0 ? ` · ${p0Count} P0` : ""}</span>`;
+    domainNodes.push({
+      content: label,
+      children: caps.map((cap) =>
+        buildCapabilityNode(cap, allFunctions, usecases, roleIdToName)
+      )
+    });
+  }
+  if (orphanFunctions.length > 0) {
+    domainNodes.push({
+      content:
+        `<span style="font-weight:700;color:#dc2626">⚠ 未归类</span>` +
+        ` <span style="color:#94a3b8;font-size:0.85em">· ${orphanFunctions.length} 个 function 缺 capability_id</span>`,
+      children: orphanFunctions.map(({ feature, moduleId }) =>
+        buildFeatureNode(feature, moduleId, roleIdToName)
+      )
+    });
+  }
+
+  return {
+    content: escapeHtml(productName),
+    children: domainNodes
+  };
+}
+
+function buildCapabilityNode(
+  cap: CapabilityWithRefs,
+  allFunctions: Array<{ feature: ModuleWithFeatures["features"][number]; moduleId: string }>,
+  usecases: UseCase[],
+  roleIdToName: Map<string, string>
+): IPureNode {
+  // 按 function_ids 顺序找出该 capability 下的 functions
+  const capFunctions = cap.function_ids
+    .map((fid) => allFunctions.find((af) => af.feature.id === fid))
+    .filter((x): x is { feature: ModuleWithFeatures["features"][number]; moduleId: string } => Boolean(x));
+
+  const priorityColor = cap.priority === "P0" ? "#dc2626" : cap.priority === "P1" ? "#d97706" : "#64748b";
+  const statusBadge =
+    cap.status === "confirmed"
+      ? `<span style="color:#059669;font-size:0.85em" title="status=confirmed">✅</span>`
+      : `<span style="color:#94a3b8;font-size:0.85em" title="status=draft">📝</span>`;
+  const label =
+    `<span style="font-weight:600">${escapeHtml(cap.name)}</span>` +
+    ` <span style="color:${priorityColor};font-weight:600;font-size:0.85em">${cap.priority}</span>` +
+    ` ${statusBadge}`;
+  return {
+    content: label,
+    payload: {
+      capabilityRef: { capabilityId: cap.id }
+    },
+    children: capFunctions.map(({ feature, moduleId }) =>
+      buildFunctionNodeWithUseCases(feature, moduleId, usecases, roleIdToName)
+    )
+  };
+}
+
+function buildFunctionNodeWithUseCases(
+  f: ModuleWithFeatures["features"][number],
+  moduleId: string,
+  usecases: UseCase[],
+  roleIdToName: Map<string, string>
+): IPureNode {
+  const node = buildFeatureNode(f, moduleId, roleIdToName);
+  // 找该 function 的 usecases
+  const fnUsecases = usecases.filter((u) => u.function_id === f.id);
+  if (fnUsecases.length === 0) return node;
+  return {
+    ...node,
+    children: fnUsecases.map((u) => buildUseCaseNode(u, roleIdToName))
+  };
+}
+
+function buildUseCaseNode(uc: UseCase, roleIdToName: Map<string, string>): IPureNode {
+  const actorName = roleIdToName.get(uc.actor_id) ?? uc.actor_id;
+  const label =
+    `<span style="color:#475569">${escapeHtml(uc.id)}</span>` +
+    ` <span style="color:#d97706;font-size:0.85em">@${escapeHtml(actorName)}</span>`;
+  return {
+    content: label,
+    payload: {
+      usecaseRef: {
+        module: uc.module,
+        function_id: uc.function_id,
+        usecase_id: uc.id
+      }
+    },
+    children: []
   };
 }
 
