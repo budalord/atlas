@@ -30,23 +30,27 @@ function isBookkeepingQuestion(q: EntityQuestion): boolean {
   return q.feature === "(cross)" || q.module === "(cross)";
 }
 
-// 实体需要决策者亲自审的判定 — 否则视为机械映射, 自动通过
+// 实体需要决策者亲自审的判定 — 信号是 agent 自己在 `**待你拍**` 段留下了真实勾选项
+// (features 已经决过的流程/权限/约束, agent 应该自决, 不该塞回实体)
+function countPendingTodos(view: string): number {
+  return (view.match(/^\s*-\s*\[\s*\]/gm) ?? []).length;
+}
+
 function needsHumanReview(e: DerivedEntity): boolean {
-  if (e.sourceFeatures.length >= 2) return true;
   if (e.layer === "[TBD]" || e.layer.includes("[TBD]")) return true;
   if (e.maintainers === "[TBD]" || e.maintainers.includes("[TBD]")) return true;
   if (!e.decisionMakerView) return true;
-  if (/\[TBD\]/.test(e.body)) return true;
+  if (countPendingTodos(e.decisionMakerView) > 0) return true;
   return false;
 }
 
 function whyCritical(e: DerivedEntity): string {
   const reasons: string[] = [];
-  if (e.sourceFeatures.length >= 2) reasons.push(`合并自 ${e.sourceFeatures.length} 个 feature`);
   if (e.layer.includes("[TBD]")) reasons.push("归属待定");
   if (e.maintainers.includes("[TBD]")) reasons.push("维护人待定");
   if (!e.decisionMakerView) reasons.push("缺给决策者段");
-  if (/\[TBD\]/.test(e.body)) reasons.push("字段有 [TBD]");
+  const todos = countPendingTodos(e.decisionMakerView);
+  if (todos > 0) reasons.push(`${todos} 项待拍`);
   return reasons.join(" · ");
 }
 

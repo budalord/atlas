@@ -591,6 +591,34 @@ ENTITIES-OWNERSHIP / GLOBAL-FEEDBACK[entity 段] + questions-decisions.yml),产�
   - 同样的 question 本轮**不要再抛**
   - 该问题如果还需要处理, 自决(纯工程决策)或在 entity .md 加 Agent note 留 trail
 
+## ⚠ \`**待你拍**\` 段在实体里几乎应该是空的(决策者反馈)
+
+决策者已经在"功能与用例"tab 看过所有 features 的 \`**待你拍**\` — features 是业务决策的主战场, 流程 / 权限 / 业务约束 / 关键取舍都在 features 里拍过了。 实体派生只是把 features 已经决定的事翻译成数据建模, **不要在实体卡里重新生成一坨"待你拍"**, 否则决策者要重复决策同一件事。
+
+**实体卡 \`**待你拍**\` 段填法**:
+- **默认写"暂无"** — 90% 以上的实体应该这样
+- 仅当满足以下任一才写勾选项:
+  1. **派生时才浮现的新业务点** — features / SEAMS / DECISIONS / ENTITIES-OWNERSHIP 都没拍, 是建模时才出现的业务决策(例: 推荐人改名后历史关系字段存 id 还是 name)
+  2. **跨 feature 不一致** — 多个 feature 提到同一字段约束不同, 必须业务方仲裁
+  3. **架构边界** — 实体存在哪个系统(ERP / 飞书 / 第三方 CRM / 凡科), 业务方决策
+  4. **完全无线索** — features 没字段没描述, 你必须派生但无依据 → 走 questions.md 抛业务 question, 不留 待你拍
+
+**每条 \`**待你拍**\` 必须能答出**: "为什么这事在 features 里没解 / 不该在 features 里解"。 答不出 → 删掉, 去 features 找答案或自决。
+
+**每实体硬上限 2 条**。 超过说明你没消化 features 或者把工程决策塞进来了, 回去重读 5 级自检。
+
+**❌ 反例**(实体卡里不该出现的"待你拍"):
+- "单文件大小上限多少"(默认 50MB / 100MB 这种操作类参数, 写到字段约束默认值即可)
+- "学员 User 与 Student 实体是双向 FK 还是单向"(纯工程, 自决, 加 \`<!-- Agent note -->\` 留痕)
+- "套餐里多个产品按权益条数摊还是原价比例摊"(features/sales/order-creation 字段清单里有, 没找到说明你没读)
+- "删除附件是否所有场景都要校长批准"(features 权限段或 ENTITIES-OWNERSHIP 有, 不是新决策)
+- "状态机要不要加 cancelled 状态"(看 feature 状态转移段 / 自决)
+
+**✅ 正例**:
+- "Lead 是 ERP 自己存还是只在第三方 CRM(飞书 / 企微)存"(架构边界, agent 无法自决)
+- "教师工资记录在 ERP 内还是飞书报销中"(数据归属, 业务方拍)
+- "推荐人改名后历史关系字段保持 id 还是写历史 name"(新建模决策, features 没覆盖)
+
 ## ⚠ 抛 question 前必读(见 entity-contract §6.3.5)
 
 **用户做业务规则决定,不做 schema/工程决定**。
