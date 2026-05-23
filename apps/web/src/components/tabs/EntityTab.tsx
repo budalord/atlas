@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type {
   ApiEnvelope,
   DerivedEntitiesData,
@@ -23,6 +23,31 @@ function isRecentlyDerived(generated_at: string | null): boolean {
   const t = Date.parse(generated_at);
   if (Number.isNaN(t)) return false;
   return Date.now() - t < NEW_BADGE_DAYS * 86400 * 1000;
+}
+
+// agent 内部 bookkeeping question(归属表同步等) — feature 字段为 (cross) 表示不绑定具体 feature
+function isBookkeepingQuestion(q: EntityQuestion): boolean {
+  return q.feature === "(cross)" || q.module === "(cross)";
+}
+
+// 实体需要决策者亲自审的判定 — 否则视为机械映射, 自动通过
+function needsHumanReview(e: DerivedEntity): boolean {
+  if (e.sourceFeatures.length >= 2) return true;
+  if (e.layer === "[TBD]" || e.layer.includes("[TBD]")) return true;
+  if (e.maintainers === "[TBD]" || e.maintainers.includes("[TBD]")) return true;
+  if (!e.decisionMakerView) return true;
+  if (/\[TBD\]/.test(e.body)) return true;
+  return false;
+}
+
+function whyCritical(e: DerivedEntity): string {
+  const reasons: string[] = [];
+  if (e.sourceFeatures.length >= 2) reasons.push(`合并自 ${e.sourceFeatures.length} 个 feature`);
+  if (e.layer.includes("[TBD]")) reasons.push("归属待定");
+  if (e.maintainers.includes("[TBD]")) reasons.push("维护人待定");
+  if (!e.decisionMakerView) reasons.push("缺给决策者段");
+  if (/\[TBD\]/.test(e.body)) reasons.push("字段有 [TBD]");
+  return reasons.join(" · ");
 }
 
 /**
@@ -77,19 +102,30 @@ export function EntityTab({ productId, readOnly = false }: EntityTabProps) {
   if (entitiesData === null) return <div className="p-5 text-xs text-slate-500">加载中...</div>;
 
   const entities = entitiesData.entities;
-  const pendingQuestions = (questionsData?.questions ?? []).filter((q) => q.status === "pending");
-  const reviewedCount = entities.filter((e) => e.reviewedAt).length;
+  const allQuestions = questionsData?.questions ?? [];
+  // 按 feature 字段区分业务 question vs 工程 question(agent 元决策)
+  const businessQuestions = allQuestions.filter((q) => !isBookkeepingQuestion(q));
+  const bookkeepingQuestions = allQuestions.filter(isBookkeepingQuestion);
+  const pendingBusinessQuestions = businessQuestions.filter((q) => q.status === "pending");
+  const pendingQuestions = allQuestions.filter((q) => q.status === "pending");
+
+  // 实体分组: 需要你拍 vs 机械映射
+  // 需要你拍 = 多 feature 合并 / layer-TBD / 缺给决策者段 / 字段含 TBD
+  const critical = entities.filter((e) => needsHumanReview(e));
+  const mechanical = entities.filter((e) => !needsHumanReview(e));
+  const criticalReviewed = critical.filter((e) => e.reviewedAt).length;
+  const allCriticalReviewed = critical.length === 0 || criticalReviewed === critical.length;
   const totalEntities = entities.length;
-  const allReviewed = totalEntities > 0 && reviewedCount === totalEntities;
-  const gatePassed = allReviewed && pendingQuestions.length === 0;
+  const gatePassed = allCriticalReviewed && pendingBusinessQuestions.length === 0 && totalEntities > 0;
 
   return (
     <div className="flex min-h-0 flex-col overflow-auto">
       <GateBanner
         gatePassed={gatePassed}
-        reviewedCount={reviewedCount}
-        totalEntities={totalEntities}
-        pendingQuestions={pendingQuestions.length}
+        criticalReviewed={criticalReviewed}
+        criticalTotal={critical.length}
+        mechanicalTotal={mechanical.length}
+        pendingBusiness={pendingBusinessQuestions.length}
         hasEntities={totalEntities > 0}
       />
 
@@ -107,13 +143,32 @@ export function EntityTab({ productId, readOnly = false }: EntityTabProps) {
         </div>
       ) : null}
 
-      {questionsData && questionsData.exists && questionsData.questions.length > 0 ? (
+      {questionsData && questionsData.exists && businessQuestions.length > 0 ? (
         <QuestionsSection
           productId={productId}
-          questionsData={questionsData}
+          questions={businessQuestions}
+          allQuestionsIndex={allQuestions}
+          title="待决策 question"
           readOnly={readOnly}
           onChanged={() => void load()}
         />
+      ) : null}
+
+      {questionsData && questionsData.exists && bookkeepingQuestions.length > 0 ? (
+        <details className="border-b border-slate-200 bg-slate-50/60">
+          <summary className="cursor-pointer px-5 py-2 text-[11px] text-slate-600">
+            ▸ {bookkeepingQuestions.length} 个 agent 内部 bookkeeping question(归属表同步等, 通常 agent 自决, 仅在异常时展开)
+          </summary>
+          <QuestionsSection
+            productId={productId}
+            questions={bookkeepingQuestions}
+            allQuestionsIndex={allQuestions}
+            title=""
+            readOnly={readOnly}
+            onChanged={() => void load()}
+            compact
+          />
+        </details>
       ) : null}
 
       {!entitiesData.exists ? (
@@ -136,20 +191,51 @@ export function EntityTab({ productId, readOnly = false }: EntityTabProps) {
         </details>
       ) : null}
 
-      {entities.length > 0 ? (
-        <ul className="m-5 grid grid-cols-1 gap-3 lg:grid-cols-2">
-          {entities.map((entity) => (
-            <li key={entity.name}>
-              <EntityCard
-                entity={entity}
-                productId={productId}
-                readOnly={readOnly}
-                onChanged={() => void load()}
-                pendingQuestionsCount={pendingQuestions.length}
-              />
-            </li>
-          ))}
-        </ul>
+      {critical.length > 0 ? (
+        <section className="mx-5 mt-5">
+          <header className="mb-2 flex items-center gap-2 text-[12px] font-medium text-slate-700">
+            <span className="inline-block h-2 w-2 rounded-full bg-amber-500" />
+            需要你拍 ({criticalReviewed}/{critical.length} 已审)
+            <span className="text-[11px] font-normal text-slate-500">
+              · 多 feature 合并 / 归属待定 / 字段有 [TBD] / 缺给决策者段
+            </span>
+          </header>
+          <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {critical.map((entity) => (
+              <li key={entity.name}>
+                <EntityCard
+                  entity={entity}
+                  productId={productId}
+                  readOnly={readOnly}
+                  onChanged={() => void load()}
+                  pendingQuestionsCount={pendingQuestions.length}
+                  reason={whyCritical(entity)}
+                />
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {mechanical.length > 0 ? (
+        <details className="mx-5 mt-4 mb-5 rounded-md border border-slate-200 bg-slate-50/60">
+          <summary className="cursor-pointer px-3 py-2 text-[12px] text-slate-700">
+            ▸ {mechanical.length} 个机械映射(1 个 feature 直推 · 默认通过, 不需要单独审)
+          </summary>
+          <ul className="grid grid-cols-1 gap-3 px-3 pb-3 lg:grid-cols-2">
+            {mechanical.map((entity) => (
+              <li key={entity.name}>
+                <EntityCard
+                  entity={entity}
+                  productId={productId}
+                  readOnly={readOnly}
+                  onChanged={() => void load()}
+                  pendingQuestionsCount={pendingQuestions.length}
+                />
+              </li>
+            ))}
+          </ul>
+        </details>
       ) : null}
 
       {promptOpen ? (
@@ -169,33 +255,38 @@ export function EntityTab({ productId, readOnly = false }: EntityTabProps) {
  * ============================================================ */
 function GateBanner({
   gatePassed,
-  reviewedCount,
-  totalEntities,
-  pendingQuestions,
+  criticalReviewed,
+  criticalTotal,
+  mechanicalTotal,
+  pendingBusiness,
   hasEntities
 }: {
   gatePassed: boolean;
-  reviewedCount: number;
-  totalEntities: number;
-  pendingQuestions: number;
+  criticalReviewed: number;
+  criticalTotal: number;
+  mechanicalTotal: number;
+  pendingBusiness: number;
   hasEntities: boolean;
 }) {
   if (!hasEntities) return null;
   if (gatePassed) {
     return (
       <div className="border-b border-emerald-200 bg-emerald-50 px-5 py-2.5 text-[13px] font-medium text-emerald-900">
-        实体审查通过 ({reviewedCount}/{totalEntities} 已审 · 0 待决策 question) — 可进入原型 tab
+        实体审查通过 (需要你拍 {criticalReviewed}/{criticalTotal} 已审 · {mechanicalTotal} 个机械映射自动通过 · 0 待决策 question) — 可进入原型 tab
       </div>
     );
   }
-  const stillToReview = totalEntities - reviewedCount;
+  const stillToReview = criticalTotal - criticalReviewed;
   return (
     <div className="border-b border-slate-200 bg-slate-50 px-5 py-2 text-[12px] text-slate-700">
-      立项审查进度: 已审 <span className="font-semibold text-slate-900">{reviewedCount}</span> /{" "}
-      {totalEntities} 实体
+      立项审查进度: 已审 <span className="font-semibold text-slate-900">{criticalReviewed}</span> /{" "}
+      {criticalTotal} 需要你拍
       {stillToReview > 0 ? <span> · 还需审 {stillToReview} 个</span> : null}
-      {pendingQuestions > 0 ? (
-        <span> · 待决策 <span className="font-semibold text-amber-700">{pendingQuestions}</span> 个 question</span>
+      {mechanicalTotal > 0 ? (
+        <span className="text-slate-500"> · {mechanicalTotal} 个机械映射自动通过</span>
+      ) : null}
+      {pendingBusiness > 0 ? (
+        <span> · 待决策 <span className="font-semibold text-amber-700">{pendingBusiness}</span> 个 question</span>
       ) : null}
     </div>
   );
@@ -266,60 +357,53 @@ function EmptyState({ onOpenPrompt, readOnly }: { onOpenPrompt: () => void; read
  * ============================================================ */
 function QuestionsSection({
   productId,
-  questionsData,
+  questions,
+  allQuestionsIndex,
+  title,
   readOnly,
-  onChanged
+  onChanged,
+  compact = false
 }: {
   productId: string;
-  questionsData: DerivedEntityQuestionsData;
+  questions: EntityQuestion[];
+  allQuestionsIndex: EntityQuestion[];
+  title: string;
   readOnly: boolean;
   onChanged: () => void;
+  compact?: boolean;
 }) {
-  const pending = questionsData.questions.filter((q) => q.status === "pending");
-  const decided = questionsData.questions.filter((q) => q.status !== "pending");
-  const hasLint =
-    !questionsData.questions_lint_ok && questionsData.questions_lint_errors.length > 0;
+  const pending = questions.filter((q) => q.status === "pending");
+  const decided = questions.filter((q) => q.status !== "pending");
 
   return (
-    <section className="border-b border-slate-200 bg-white">
-      <header className="flex items-center justify-between bg-amber-50/60 px-5 py-2">
-        <div className="flex items-center gap-2 text-[12px]">
-          <span className="font-medium text-slate-900">
-            派生 Agent 抛了 {questionsData.questions.length} 个 question
-          </span>
-          <span className="text-slate-500">
-            · 待决策 {pending.length} · 已决策 {decided.length}
-          </span>
-          {hasLint ? (
-            <span className="rounded bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-800">
-              含 trigger lint 错误
+    <section className={compact ? "" : "border-b border-slate-200 bg-white"}>
+      {title ? (
+        <header className="flex items-center justify-between bg-amber-50/60 px-5 py-2">
+          <div className="flex items-center gap-2 text-[12px]">
+            <span className="font-medium text-slate-900">
+              {title} {questions.length} 条
             </span>
-          ) : null}
-        </div>
-      </header>
-
-      {hasLint ? (
-        <ul className="border-b border-rose-100 bg-rose-50/40 px-5 py-2 text-[11px] text-rose-800">
-          {questionsData.questions_lint_errors.slice(0, 3).map((e, i) => (
-            <li key={i}>• {e}</li>
-          ))}
-          {questionsData.questions_lint_errors.length > 3 ? (
-            <li>... ({questionsData.questions_lint_errors.length - 3} more)</li>
-          ) : null}
-        </ul>
+            <span className="text-slate-500">
+              · 待决策 {pending.length} · 已决策 {decided.length}
+            </span>
+          </div>
+        </header>
       ) : null}
 
       <ul className="divide-y divide-slate-100">
-        {questionsData.questions.map((q, idx) => (
-          <QuestionRow
-            key={`${idx}-${q.question.slice(0, 20)}`}
-            idx={idx}
-            question={q}
-            productId={productId}
-            readOnly={readOnly}
-            onChanged={onChanged}
-          />
-        ))}
+        {questions.map((q) => {
+          const idx = allQuestionsIndex.indexOf(q);
+          return (
+            <QuestionRow
+              key={`${idx}-${q.question.slice(0, 20)}`}
+              idx={idx}
+              question={q}
+              productId={productId}
+              readOnly={readOnly}
+              onChanged={onChanged}
+            />
+          );
+        })}
       </ul>
     </section>
   );
@@ -500,13 +584,15 @@ function EntityCard({
   productId,
   readOnly,
   onChanged,
-  pendingQuestionsCount: _pendingQuestionsCount
+  pendingQuestionsCount: _pendingQuestionsCount,
+  reason
 }: {
   entity: DerivedEntity;
   productId: string;
   readOnly: boolean;
   onChanged: () => void;
   pendingQuestionsCount: number;
+  reason?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -574,6 +660,9 @@ function EntityCard({
             {entity.sourceSeams.length > 0 ? ` · seams × ${entity.sourceSeams.length}` : ""}
             {entity.sourceDecisions.length > 0 ? ` · decisions × ${entity.sourceDecisions.length}` : ""}
           </div>
+          {reason ? (
+            <div className="mt-1 text-[10px] text-amber-700">为什么需要你拍: {reason}</div>
+          ) : null}
         </div>
         {!readOnly ? (
           <button

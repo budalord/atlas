@@ -39,8 +39,8 @@ export async function loadDerivedEntities(productId: string): Promise<DerivedEnt
   } catch {
     return [];
   }
-  const skip = new Set(["questions.md", "reconcile-report.md"]);
-  const entityFiles = files.filter((f) => !skip.has(f));
+  // 只收 PascalCase 文件名(契约 §3.4 命名规范) — 跳过 questions.md / reconcile-report.md / _PLAN.md 等 agent 内部产物
+  const entityFiles = files.filter((f) => /^[A-Z]/.test(f));
 
   const out: DerivedEntity[] = [];
   for (const fname of entityFiles) {
@@ -111,7 +111,7 @@ export async function computeDerivedEntitiesStale(productId: string): Promise<{
   let entityFiles: string[];
   try {
     entityFiles = (await listMarkdownFiles("products", productId, "derived", "entities")).filter(
-      (f) => f !== "questions.md" && f !== "reconcile-report.md"
+      (f) => /^[A-Z]/.test(f)
     );
   } catch {
     return { derivedNewestMtime: null, stale: false, stale_reason: null };

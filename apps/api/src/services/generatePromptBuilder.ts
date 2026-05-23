@@ -611,6 +611,9 @@ ENTITIES-OWNERSHIP / GLOBAL-FEEDBACK[entity 段] + questions-decisions.yml),产�
 - ❌ "X 是 FK 还是嵌入?"(关系建模 / 自决)
 - ❌ "状态机要不要加 X 状态?"(看 feature 状态转移段 / 自决)
 - ❌ "X 是否应该有索引?"(纯工程)
+- ❌ "ENTITIES-OWNERSHIP 表里声明无派生的 X 还需要吗?"(reconcile 报告里你自己写"已被 X 替代 / v0 不做"的判断 = 已自决, 不要再抛)
+- ❌ "派生有声明无的 N 个实体是否加入归属表?"(归属表同步是 agent 元工作, 不是决策者业务, 把建议直接写进 reconcile-report 的"建议 layer"列即可)
+- ❌ "Lead 的 layer 是机构层还是校区?"(看 features 是否跨校区使用即可自决 — 没线索就标 [TBD] + agent note, 不抛 question)
 
 **正例**:
 - ✅ "推荐人改名后,推荐关系字段保持 id 还是写历史 name?"(业务规则)
