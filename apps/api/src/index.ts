@@ -1,7 +1,9 @@
 import cors from "cors";
 import express from "express";
+import { actorsRouter } from "./routes/actors";
 import { aiRouter } from "./routes/ai";
 import { agentsRouter } from "./routes/agents";
+import { capabilitiesRouter } from "./routes/capabilities";
 import { contractsRouter } from "./routes/contracts";
 import { designsRouter } from "./routes/designs";
 import { entitiesRouter, productAuxRouter } from "./routes/entities";
@@ -16,6 +18,7 @@ import { tasksRouter } from "./routes/tasks";
 import { intakeRouter } from "./routes/intake";
 import { productsRouter } from "./routes/products";
 import { productSpecRouter, specRouter } from "./routes/spec";
+import { usecasesRouter } from "./routes/usecases";
 import { DATA_ROOT } from "./services/fileReader";
 import { getDataVersion, onDataChange, startDataWatcher } from "./services/watcher";
 
@@ -50,6 +53,9 @@ app.get("/api/events", (req, res) => {
   });
 });
 
+app.use("/api/products/:id/actors", actorsRouter);
+app.use("/api/products/:id/capabilities", capabilitiesRouter);
+app.use("/api/products/:id/usecases", usecasesRouter);
 app.use("/api/products/:id/entities", entitiesRouter);
 app.use("/api/products/:id/features", featuresRouter);
 app.use("/api/products/:id/flowchart", flowchartsRouter);

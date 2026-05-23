@@ -48,3 +48,15 @@ export async function getFileMtime(...segments: string[]) {
     throw error;
   }
 }
+
+/**
+ * 检查 data 路径下文件/目录是否存在(不区分类型, 仅判可访问)。
+ */
+export async function pathExists(...segments: string[]): Promise<boolean> {
+  try {
+    await fs.access(dataPath(...segments));
+    return true;
+  } catch {
+    return false;
+  }
+}

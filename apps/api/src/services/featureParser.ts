@@ -20,11 +20,15 @@ interface FeatureFrontmatter {
   spec_level?: number;
   /** 批次 1' · 反馈池非空时由后端自动写 true;Agent revise 后自己抹掉 */
   needs_revision?: boolean;
-  /** 参与该功能点的角色 id 列表(来自 data/roles.yml 的 id,kebab-case)。
-   *  非数组当空,id 不在 registry 中由 server 写盘前校验,parse 阶段透传不丢弃。 */
+  /** 参与该功能点的角色 id 列表(v0.0 旧字段, v0.1 起 alias 到 actor_ids)。 */
   roles?: unknown;
-  /** 管理模块 id(三层架构中层)。非字符串当空。 */
+  /** v0.1 新: 参与该 function 的 actor id 列表(引用 actors/<id>.md)。
+   *  parser 自动与 roles 双向同步, 旧 .md 仅有 roles 也能用。 */
+  actor_ids?: unknown;
+  /** 管理模块 id(v0.0 三层架构中层, v0.1 起废弃, 由 capability_id 取代)。非字符串当空。 */
   module_group?: unknown;
+  /** v0.1 新: 归属 Capability id, 引用 capabilities/<id>.md。缺失 → l0 警告。 */
+  capability_id?: unknown;
   /** 中形态:操作的实体规范名清单(PascalCase)。非数组当空。 */
   entities_touched?: unknown;
   /** 中形态:归属层(org / campus / follows:Entity / shared)。非字符串当空。 */
@@ -83,9 +87,19 @@ export function parseFeatureMarkdown(idFromFile: string, source: string): Featur
   const revision_log = parseRevisionLog(body);
   const spec_level = typeof fm.spec_level === "number" ? fm.spec_level : undefined;
   const needs_revision = fm.needs_revision === true ? true : undefined;
-  const roles = normalizeRoles(fm.roles);
+  // v0.1: actor_ids 是新真源, roles 是旧字段。两者双向 alias:
+  //  - 若 .md 仅有 roles → actor_ids 同步;
+  //  - 若 .md 仅有 actor_ids → roles 同步;
+  //  - 若两者并存 → actor_ids 优先, 但 roles 也保留作向后兼容(不强求一致)。
+  const rolesField = normalizeRoles(fm.roles);
+  const actorIdsField = normalizeRoles(fm.actor_ids);
+  const actor_ids = actorIdsField.length > 0 ? actorIdsField : rolesField;
+  const roles = rolesField.length > 0 ? rolesField : actorIdsField;
   const module_group = typeof fm.module_group === "string" && fm.module_group.trim().length > 0
     ? fm.module_group.trim()
+    : undefined;
+  const capability_id = typeof fm.capability_id === "string" && fm.capability_id.trim().length > 0
+    ? fm.capability_id.trim()
     : undefined;
   const entities_touched = normalizeEntitiesTouched(fm.entities_touched);
   const ownership = typeof fm.ownership === "string" && fm.ownership.trim().length > 0
@@ -128,7 +142,9 @@ export function parseFeatureMarkdown(idFromFile: string, source: string): Featur
     ...(spec_level !== undefined ? { spec_level } : {}),
     ...(needs_revision ? { needs_revision } : {}),
     ...(roles.length > 0 ? { roles } : {}),
+    ...(actor_ids.length > 0 ? { actor_ids } : {}),
     ...(module_group ? { module_group } : {}),
+    ...(capability_id ? { capability_id } : {}),
     ...(entities_touched.length > 0 ? { entities_touched } : {}),
     ...(ownership ? { ownership } : {}),
     ...(fields && fields.length > 0 ? { fields } : {}),

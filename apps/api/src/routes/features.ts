@@ -40,7 +40,9 @@ featuresRouter.post("/", async (req: Request<{ id: string }>, res, next) => {
       featureId,
       name,
       roles,
+      actor_ids: actorIdsRaw,
       module_group: moduleGroupRaw,
+      capability_id: capabilityIdRaw,
       entities_touched: entitiesRaw,
       ownership: ownershipRaw
     } = req.body ?? {};
@@ -99,6 +101,18 @@ featuresRouter.post("/", async (req: Request<{ id: string }>, res, next) => {
     }
     if (typeof moduleGroupRaw === "string" && moduleGroupRaw.trim().length > 0) {
       frontmatter.module_group = moduleGroupRaw.trim();
+    }
+    // v0.1: capability_id 必填(软兼容: 接受 body 没传, 但 l0 会警告)
+    if (typeof capabilityIdRaw === "string" && capabilityIdRaw.trim().length > 0) {
+      frontmatter.capability_id = capabilityIdRaw.trim();
+    }
+    // v0.1: actor_ids (新字段, 优先 over roles)
+    if (Array.isArray(actorIdsRaw)) {
+      const clean = actorIdsRaw
+        .filter((x): x is string => typeof x === "string")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      if (clean.length > 0) frontmatter.actor_ids = clean;
     }
     if (Array.isArray(entitiesRaw)) {
       const clean = entitiesRaw
