@@ -17,15 +17,6 @@ import { GlobalFeedbackPanel } from "../GlobalFeedbackPanel";
 import { PromptModalDialog, type PromptMode } from "../PromptModalDialog";
 import { UseCaseModal } from "../UseCaseModal";
 
-/** 7 天内创建且未审阅 → 🆕 徽章 */
-const NEW_BADGE_DAYS = 7;
-function isRecentlyCreated(createdAt: string): boolean {
-  if (!createdAt) return false;
-  const created = Date.parse(createdAt);
-  if (Number.isNaN(created)) return false;
-  return Date.now() - created < NEW_BADGE_DAYS * 86400 * 1000;
-}
-
 interface FeatureTabProps {
   productId: string;
   /** 老接口保留:批次 2' markmap 不会主动调,但 ProductDetail 仍传 */
@@ -733,11 +724,11 @@ function buildFeatureNode(
   // 样式: 小字, 颜色提示状态, 圆角浅色背景以与节点内容分隔
   const badgeStyle = "font-size:0.75em;font-weight:600;padding:1px 5px;border-radius:3px;margin-left:4px;vertical-align:middle";
   const badges: string[] = [];
-  const isNew = !f.reviewed_at && isRecentlyCreated(f.created_at);
-  if (isNew) {
-    badges.push(`<span style="${badgeStyle};color:#0369a1;background:#e0f2fe" title="7 天内新建, 尚未审阅">新</span>`);
-  }
-  if (f.reviewed_at) {
+  // 二态: 没 reviewed_at → 新增; 有 reviewed_at → 已审
+  // (之前还套了 7 天窗口, 但立项阶段功能点立场是"全部待审", 没 reviewed_at 就该亮"新增")
+  if (!f.reviewed_at) {
+    badges.push(`<span style="${badgeStyle};color:#0369a1;background:#e0f2fe" title="尚未审阅">新增</span>`);
+  } else {
     badges.push(
       `<span style="${badgeStyle};color:#047857;background:#d1fae5" title="决策者已审 · ${escapeHtml(f.reviewed_at)}">已审</span>`
     );
