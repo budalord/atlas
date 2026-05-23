@@ -1,7 +1,7 @@
 import { Router } from "express";
-import type { GlobalFeedbackScope } from "@atlas/shared";
 import { getDataVersion } from "../services/watcher";
 import {
+  buildActorRevisePrompt,
   buildFeatureRevisePrompt,
   buildEntityRevisePrompt,
   buildPrototypeRevisePrompt
@@ -18,7 +18,8 @@ import {
 
 export const promptsRouter = Router({ mergeParams: true });
 
-const REVISE_SCOPES = new Set<GlobalFeedbackScope>(["feature", "entity", "prototype"]);
+type ReviseScope = "feature" | "entity" | "prototype" | "actor";
+const REVISE_SCOPES = new Set<ReviseScope>(["feature", "entity", "prototype", "actor"]);
 const GENERATE_SCOPES = new Set<GenerateScope>([
   "feature",
   "entity",
@@ -34,7 +35,7 @@ promptsRouter.get("/revise-prompt", async (req, res, next) => {
     const productId = (req.params as { id: string }).id;
     const scopeRaw = req.query.scope;
     const scope = typeof scopeRaw === "string" ? scopeRaw : "feature";
-    if (!REVISE_SCOPES.has(scope as GlobalFeedbackScope)) {
+    if (!REVISE_SCOPES.has(scope as ReviseScope)) {
       res.status(400).json({
         error: `scope must be one of ${Array.from(REVISE_SCOPES).join("/")}`
       });
@@ -43,6 +44,7 @@ promptsRouter.get("/revise-prompt", async (req, res, next) => {
     let result;
     if (scope === "feature") result = await buildFeatureRevisePrompt(productId);
     else if (scope === "entity") result = await buildEntityRevisePrompt(productId);
+    else if (scope === "actor") result = await buildActorRevisePrompt(productId);
     else result = await buildPrototypeRevisePrompt(productId);
     res.json({ data: result, version: getDataVersion() });
   } catch (e) {

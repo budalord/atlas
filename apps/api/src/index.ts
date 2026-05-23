@@ -19,6 +19,7 @@ import { intakeRouter } from "./routes/intake";
 import { productsRouter } from "./routes/products";
 import { productSpecRouter, specRouter } from "./routes/spec";
 import { usecasesRouter } from "./routes/usecases";
+import { wizardRouter } from "./routes/wizard";
 import { DATA_ROOT } from "./services/fileReader";
 import { getDataVersion, onDataChange, startDataWatcher } from "./services/watcher";
 
@@ -65,6 +66,7 @@ app.use("/api/products/:id", promptsRouter);
 app.use("/api/products/:id/designs", designsRouter);
 app.use("/api/products/:id", productAuxRouter);
 app.use("/api/products/:id", productSpecRouter);
+app.use("/api/products/wizard", wizardRouter);
 app.use("/api/products", productsRouter);
 app.use("/api/tasks", tasksRouter);
 app.use("/api/contracts", contractsRouter);

@@ -16,7 +16,8 @@ export type PromptScope =
   | "entity-derive"
   | "prototype"
   | "conventions"
-  | "flowchart";
+  | "flowchart"
+  | "actor";
 
 export type PromptMode = "revise" | "generate";
 
@@ -48,7 +49,8 @@ const SCOPE_TITLE: Record<PromptScope, string> = {
   "entity-derive": "Path C 派生实体",
   prototype: "原型",
   conventions: "L0 规范",
-  flowchart: "流程图"
+  flowchart: "流程图",
+  actor: "Actor 角色"
 };
 
 const MODE_TITLE: Record<PromptMode, string> = {

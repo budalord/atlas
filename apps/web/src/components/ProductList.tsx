@@ -11,6 +11,7 @@ import { THEME_LABELS, THEME_ORDER, resolveThemeKey } from "../lib/themes";
 import type { Product } from "../types";
 import { NewProductModal } from "./NewProductModal";
 import { ProductCard } from "./ProductCard";
+import { WizardModal } from "./WizardModal";
 
 interface ProductListProps {
   products: Product[];
@@ -23,6 +24,7 @@ export function ProductList({ products, selectedProductId, onSelect }: ProductLi
     () => ({ ...PHASE_DEFAULT_COLLAPSED })
   );
   const [modalOpen, setModalOpen] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   const byPhase = new Map<ProductPhase, Product[]>();
   for (const phase of PHASE_ORDER) byPhase.set(phase, []);
@@ -46,13 +48,23 @@ export function ProductList({ products, selectedProductId, onSelect }: ProductLi
         <span className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-600">{products.length}</span>
       </div>
 
-      <button
-        className="mb-5 w-full rounded border border-dashed border-slate-300 px-3 py-2 text-xs text-slate-600 transition hover:border-slate-500 hover:text-slate-900"
-        onClick={() => setModalOpen(true)}
-        type="button"
-      >
-        + 新建 / 录入产品
-      </button>
+      <div className="mb-5 flex flex-col gap-2">
+        <button
+          className="w-full rounded border border-dashed border-slate-300 px-3 py-2 text-xs text-slate-600 transition hover:border-slate-500 hover:text-slate-900"
+          onClick={() => setModalOpen(true)}
+          type="button"
+        >
+          + 新建 / 录入产品
+        </button>
+        <button
+          className="w-full rounded bg-slate-900 px-3 py-2 text-xs font-medium text-white transition hover:bg-slate-800"
+          onClick={() => setWizardOpen(true)}
+          type="button"
+          title="5 层骨架(Actor / Capability / Function / UseCase / Entity)Wizard"
+        >
+          🎉 立项 Wizard(五层骨架)
+        </button>
+      </div>
 
       {groups.map((group, index) => {
         const isCollapsed = collapsed[group.phase];
@@ -114,6 +126,15 @@ export function ProductList({ products, selectedProductId, onSelect }: ProductLi
         onCreated={onSelect}
         open={modalOpen}
       />
+      {wizardOpen ? (
+        <WizardModal
+          onClose={() => setWizardOpen(false)}
+          onCreated={(id) => {
+            setWizardOpen(false);
+            onSelect(id);
+          }}
+        />
+      ) : null}
     </aside>
   );
 }

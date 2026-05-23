@@ -133,6 +133,34 @@ const ENTITY_FOOTER = (productId: string) => `## 注意事项
 - 如果反馈让你做"新增 entity"的事,顶层共享实体放 entities/<id>.md,模块实体放 modules/<m>/entities/<id>.md
 `;
 
+const ACTOR_TASK = `## 你的任务
+你是 Atlas 的 Actor 修订 Agent (v0.1 rev3 五层骨架)。根据下面的反馈, 修订对应的 actor md 文件。
+
+工作流要求:
+1. 先阅读所有反馈, 在响应里输出 diff plan(打算改哪些 actor / 合并哪些 / 新增哪些 / 理由)
+2. **等用户确认后**再用 Edit/Write 写文件
+3. 写完每个 actor.md 后:
+   - frontmatter 字段顺序保留 actor-contract §2 规定的 id / name / type / source / confirmed (+ 可选 code / responsibilities)
+   - **绝对不写**反向引用字段 (related_capability_ids / related_function_ids 等) — 这些 loader 运行时聚合, 写进 .md 会破坏单源原则
+   - body 部分: 业务描述自由叙述, 决策者视角
+4. **何时新建 Actor**:
+   - 反馈描述了一个目前没在 actor 池中的角色 → 新建
+   - 新 actor.md frontmatter 必须有 id / name / type / source: 'agent_suggested' / confirmed: false
+   - 默认 type 推断规则: 内部员工 → internal_user; 客户/家长/合作商 → external_user; 平台/集成方 → external_system
+5. **何时合并 Actor**:
+   - 发现池中有两个 actor 实际是同一角色(eg. "教务" + "academic-staff" 是同一概念) → 合并
+   - 合并方法: 保留更通用的 id, 把另一个的 responsibilities 合并过来, **同时改所有 capability/function/usecase 引用**
+   - 删除时直接 \`fs.unlink actors/<old_id>.md\`
+6. 全局需求池条目处理完后, 直接编辑 GLOBAL-FEEDBACK.md 清理已处理 gfb 条目, 三段结构保持
+`;
+
+const ACTOR_FOOTER = (productId: string) => `## 注意事项
+- 不要触碰 data/products/${productId}/ 之外的文件
+- actor.md 改完, capability / function / usecase 引用必须同步更新, 否则 l0 规则 6 会报警
+- 反向引用永不写入 .md frontmatter(单源原则)
+- 改 actor.type 要小心: 影响 ActorTab 卡片分组 + MatrixTab 颜色编码
+`;
+
 /** 拼接一个 feature 的反馈块 */
 function featureBlock(
   moduleId: string,
@@ -267,5 +295,35 @@ export async function buildPrototypeRevisePrompt(productId: string): Promise<Rev
   return {
     prompt: placeholder,
     stats: { global_count: global.prototype.length }
+  };
+}
+
+/**
+ * Actor 修订 prompt (v0.1 rev3). 用于 Wizard 中 Agent 反问 / 主工作台 Actor revise。
+ *
+ * 输入:
+ *   - 当前 actors/ 中的 actor 列表(基本信息 + 反向引用计数)
+ *   - 全局需求池 entity 段(Wizard 阶段没专门的 actor scope, 复用 entity 段以承载 actor 决策)
+ * 输出: agent 阅读后给出 diff plan
+ */
+export async function buildActorRevisePrompt(productId: string): Promise<ReviseResult> {
+  const meta = await loadMeta(productId);
+  const global = await parseGlobalFeedbackFile(productId);
+
+  const text = [
+    header(meta, productId, "Actor"),
+    ACTOR_TASK,
+    "",
+    "## 当前 actors 池",
+    "(由 Atlas 启动时聚合, 不要直接写反向引用)",
+    "",
+    globalSection("entity", global.entity), // 复用 entity 段作 Actor 决策容器(Actor 没专门 scope)
+    "",
+    ACTOR_FOOTER(productId)
+  ].join("\n");
+
+  return {
+    prompt: text,
+    stats: { global_count: global.entity.length }
   };
 }
