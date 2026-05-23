@@ -84,7 +84,8 @@ function OverviewPage() {
   return (
     <div className="grid min-h-0 grid-cols-1 lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)_360px]">
       <ProductList onSelect={selectProduct} products={products} selectedProductId={selectedProductId} />
-      <div className="min-h-0 overflow-auto">
+      <div className="min-h-0">
+        {/* 不再 overflow-auto — 让 window 滚动, tab 内的 sticky-top 才能对 viewport 生效 */}
         {error ? (
           <div className="m-5 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div>
         ) : null}

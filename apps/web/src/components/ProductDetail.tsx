@@ -69,7 +69,8 @@ export function ProductDetail({ product }: ProductDetailProps) {
   const readOnly = currentTab?.mode === "read-only";
 
   return (
-    <main className="min-h-0 overflow-auto bg-slate-50">
+    <main className="min-h-0 bg-slate-50">
+      {/* 不再 overflow-auto — 让 window 滚动, 这样 tab 内部 sticky-top 才能对 viewport 生效 */}
       <ProductStatusBar product={product} />
       <section className="border-b border-slate-200 bg-white p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">

@@ -143,8 +143,8 @@ export function ActorTab({ productId }: ActorTabProps) {
   }
 
   return (
-    <div className="grid h-[calc(100vh-200px)] min-h-0 grid-cols-[320px_1fr]">
-      <aside className="overflow-auto border-r border-slate-200 bg-white">
+    <div className="flex items-start">{/* master-detail: 左 list flow + 右 detail sticky-top */}
+      <aside className="w-[320px] shrink-0 border-r border-slate-200 bg-white">
         {(Object.keys(grouped) as ActorType[]).map((t) => {
           const list = grouped[t];
           if (list.length === 0) return null;
@@ -182,7 +182,7 @@ export function ActorTab({ productId }: ActorTabProps) {
         })}
       </aside>
 
-      <div className="min-h-0 overflow-auto">
+      <div className="sticky top-0 max-h-screen flex-1 self-start overflow-y-auto">
         {current ? (
           <ActorDetail
             actor={current}

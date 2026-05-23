@@ -147,13 +147,17 @@ export function EntityTab({ productId, readOnly = false }: EntityTabProps) {
       {!entitiesData.exists ? (
         <EmptyState onOpenPrompt={() => setPromptOpen(true)} readOnly={readOnly} />
       ) : (
-        <div className="flex min-h-0 flex-1 overflow-hidden">
+        // master-detail: 左 list 正常 flow (跟随 main 滚动), 右 detail sticky 在视口顶端,
+        // 不管用户滚到列表多深, 右侧详情始终可见
+        <div className="flex flex-1 items-start">
           <EntityList
             entities={entities}
             selectedName={selectedName}
             onSelect={setSelectedName}
           />
-          <EntityDetail entity={selectedEntity} />
+          <div className="sticky top-0 max-h-screen flex-1 self-start overflow-y-auto">
+            <EntityDetail entity={selectedEntity} />
+          </div>
         </div>
       )}
 
@@ -277,7 +281,7 @@ function EntityList({
   }, [entities]);
 
   return (
-    <nav className="w-60 shrink-0 overflow-y-auto border-r border-slate-200 bg-slate-50">
+    <nav className="w-60 shrink-0 border-r border-slate-200 bg-slate-50">
       {groups.map(([layer, group]) => (
         <div key={layer}>
           <div className="sticky top-0 border-b border-slate-200 bg-slate-100 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
@@ -323,7 +327,7 @@ function EntityDetail({ entity }: { entity: DerivedEntity | null }) {
   }
   const schemaBody = stripDecisionMakerView(entity.body);
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto bg-white">
+    <div className="bg-white">
       <header className="border-b border-slate-200 px-5 py-3">
         <div className="flex items-baseline gap-2">
           <span className="font-mono text-[16px] font-semibold text-slate-900">
