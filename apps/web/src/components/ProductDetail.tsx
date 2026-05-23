@@ -13,6 +13,7 @@ import { FeatureTable } from "./FeatureTable";
 import { GitHubPanel } from "./GitHubPanel";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { ProductStatusBar } from "./ProductStatusBar";
+import { ReviewDashboard } from "./ReviewDashboard";
 import { TodoBoard } from "./TodoBoard";
 import { ConventionsTab } from "./tabs/ConventionsTab";
 import { DesignTab } from "./tabs/DesignTab";
@@ -108,6 +109,7 @@ export function ProductDetail({ product }: ProductDetailProps) {
           ) : null}
         </dl>
       </section>
+      <ReviewDashboard productId={product.id} />
       {statusToPhase(product.meta.status) === "in-progress" ? (
         <AgentTasksPanel productId={product.id} />
       ) : null}
