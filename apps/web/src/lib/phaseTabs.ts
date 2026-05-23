@@ -5,6 +5,8 @@ export type TabKey =
   | "overview"
   | "spec"
   | "entities"
+  | "actors"
+  | "matrix"
   | "conventions"
   | "design";
 
@@ -26,25 +28,33 @@ const TABS_BY_PHASE: Record<ProductPhase, Array<{ key: TabKey; mode: TabMode }>>
   planning: [
     { key: "overview", mode: "read-write" },
     { key: "features", mode: "read-write" },
+    { key: "actors", mode: "read-write" },
     { key: "entities", mode: "read-write" },
+    { key: "matrix", mode: "read-write" },
     { key: "design", mode: "read-write" }
   ],
   "in-progress": [
     { key: "overview", mode: "read-write" },
     { key: "features", mode: "read-write" },
+    { key: "actors", mode: "read-write" },
     { key: "entities", mode: "read-write" },
+    { key: "matrix", mode: "read-only" },
     { key: "design", mode: "read-only" }
   ],
   live: [
     { key: "overview", mode: "read-only" },
     { key: "features", mode: "read-only" },
+    { key: "actors", mode: "read-only" },
     { key: "entities", mode: "read-only" },
+    { key: "matrix", mode: "read-only" },
     { key: "design", mode: "read-only" }
   ],
   paused: [
     { key: "overview", mode: "read-only" },
     { key: "features", mode: "read-only" },
-    { key: "entities", mode: "read-only" }
+    { key: "actors", mode: "read-only" },
+    { key: "entities", mode: "read-only" },
+    { key: "matrix", mode: "read-only" }
   ],
   archived: [
     { key: "overview", mode: "read-only" },
@@ -57,6 +67,8 @@ export const TAB_LABELS: Record<TabKey, string> = {
   overview: "概览",
   spec: "规格",          // v0.1 rev3 隐藏, label 保留供升级回滚
   entities: "实体",
+  actors: "角色",
+  matrix: "关系矩阵",
   conventions: "L0 规范",  // v0.1 rev3 隐藏, label 保留供升级回滚
   design: "双轨设计"
 };

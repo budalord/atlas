@@ -15,10 +15,12 @@ import { MarkdownRenderer } from "./MarkdownRenderer";
 import { ProductStatusBar } from "./ProductStatusBar";
 import { ReviewDashboard } from "./ReviewDashboard";
 import { TodoBoard } from "./TodoBoard";
+import { ActorTab } from "./tabs/ActorTab";
 import { ConventionsTab } from "./tabs/ConventionsTab";
 import { DesignTab } from "./tabs/DesignTab";
 import { EntityTab } from "./tabs/EntityTab";
 import { FeatureTab } from "./tabs/FeatureTab";
+import { MatrixTab } from "./tabs/MatrixTab";
 import { SpecTab } from "./tabs/SpecTab";
 import { FeatureDrawer } from "./FeatureDrawer";
 import { useUiStore } from "../stores/uiStore";
@@ -145,6 +147,8 @@ export function ProductDetail({ product }: ProductDetailProps) {
       {tab === "overview" ? <OverviewSection product={product} phase={phase} /> : null}
       {tab === "spec" ? <SpecTab productId={product.id} readOnly={readOnly} /> : null}
       {tab === "entities" ? <EntityTab productId={product.id} readOnly={readOnly} /> : null}
+      {tab === "actors" ? <ActorTab productId={product.id} readOnly={readOnly} /> : null}
+      {tab === "matrix" ? <MatrixTab productId={product.id} readOnly={readOnly} /> : null}
       {tab === "conventions" ? (
         <ConventionsTab productId={product.id} readOnly={readOnly} />
       ) : null}
