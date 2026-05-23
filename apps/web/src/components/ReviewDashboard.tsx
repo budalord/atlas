@@ -82,8 +82,9 @@ export function ReviewDashboard({ productId }: ReviewDashboardProps) {
       const entitiesArr = eJson?.data.entities ?? [];
       const entities = {
         total: entitiesArr.length,
-        reviewed: entitiesArr.filter((e) => e.reviewedAt).length,
-        missingDecisionMakerView: entitiesArr.filter((e) => !e.decisionMakerView.trim()).length
+        // rev3 后实体是纯 schema, 没有审核语义; reviewed / missingDecisionMakerView 不再可用
+        reviewed: 0,
+        missingDecisionMakerView: 0
       };
 
       const qArr = qJson?.data.questions ?? [];
@@ -222,19 +223,9 @@ export function ReviewDashboard({ productId }: ReviewDashboardProps) {
 
         <DashItem
           label="实体"
-          primary={`${data.entities.reviewed}/${data.entities.total}`}
-          tone={
-            data.entities.total === 0
-              ? "muted"
-              : data.entities.reviewed === data.entities.total
-                ? "ok"
-                : "info"
-          }
-          hint={
-            data.entities.missingDecisionMakerView > 0
-              ? `${data.entities.missingDecisionMakerView} 缺给决策者段`
-              : null
-          }
+          primary={`${data.entities.total}`}
+          tone={data.entities.total === 0 ? "muted" : "info"}
+          hint={null}
         />
 
         <DashItem
