@@ -4,6 +4,7 @@ import { loadRolesRegistry } from "./rolesRegistry";
 import { loadActors } from "./actorLoader";
 import { loadCapabilities } from "./capabilityLoader";
 import { loadUseCases } from "./usecaseLoader";
+import { loadDerivedEntities } from "./derivedEntityLoader";
 
 /**
  * 机械化 L0 违规检测。
@@ -26,15 +27,20 @@ export async function runL0Lint(productId: string): Promise<L0ViolationsData> {
   const validRoleIds = new Set(registry.roles.map((r) => r.id));
 
   // v0.1: 加载 actors / capabilities / usecases / entities 用于引用完整性检查(规则 6 + 8)
-  const [actors, capabilities, usecases, entities] = await Promise.all([
+  // entity_ids 解析时同时认 entities/(声明区)和 derived/entities/(派生区) — rev3 把派生视为一等公民
+  const [actors, capabilities, usecases, entities, derivedEntities] = await Promise.all([
     loadActors(productId),
     loadCapabilities(productId),
     loadUseCases(productId),
-    loadEntities(productId)
+    loadEntities(productId),
+    loadDerivedEntities(productId)
   ]);
   const validActorIds = new Set(actors.map((a) => a.id));
   const validCapabilityIds = new Set(capabilities.map((c) => c.id));
-  const validEntityIds = new Set(entities.map((e) => e.id));
+  const validEntityIds = new Set<string>([
+    ...entities.map((e) => e.id),
+    ...derivedEntities.map((e) => e.name)
+  ]);
 
   // 收集所有 functions 用于规则 8 (capability 粒度) + 规则 1 (id 全局唯一)
   const allFunctions: { fn: import("@atlas/shared").FeaturePoint; mod: string }[] = [];
@@ -199,7 +205,7 @@ export async function runL0Lint(productId: string): Promise<L0ViolationsData> {
       if (!validEntityIds.has(eid)) {
         violations.push({
           category: "invalid-reference",
-          message: `entity_ids "${eid}" 在 entities/ 中找不到`,
+          message: `entity_ids "${eid}" 在 entities/ 或 derived/entities/ 中找不到`,
           source: capSource,
           severity: "warn"
         });
