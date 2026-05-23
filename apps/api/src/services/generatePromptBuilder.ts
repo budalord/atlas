@@ -6,6 +6,9 @@ import { normalizeProductMeta, parseYaml } from "./markdownParser";
 import { loadEntities, loadModules, loadFeatures } from "./entityLoader";
 import { loadRolesRegistry } from "./rolesRegistry";
 import { parseGlobalFeedbackFile } from "./globalFeedbackParser";
+import { loadActors } from "./actorLoader";
+import { loadCapabilities, attachCapabilityRefs } from "./capabilityLoader";
+import { loadUseCases } from "./usecaseLoader";
 
 export interface FeatureGenerateStats {
   has_description: boolean;
@@ -116,28 +119,43 @@ export async function buildFeatureGeneratePrompt(productId: string): Promise<Gen
       : "";
 
   const parts = [
-    header(meta, productId, "功能点"),
+    header(meta, productId, "功能与用例"),
     `## 你的任务
-你是 Atlas 的大 Agent。基于产品描述,生成 Atlas 三层架构的功能点骨架,**严格遵守 feature-source-contract**。
+你是 Atlas 的大 Agent。基于产品描述,生成 Atlas **五层骨架**的功能与用例骨架,**严格遵守 feature-source-contract + capability-contract + usecase-contract + actor-contract**。
 
-**三层架构**:
-1. **业务方向 (module)** — 顶层划分,如 销售线 / 财务线 / 教务线
-2. **管理模块 (module_group)** — 中层,每条业务方向下的几个管理域,如 学员管理 / 订单管理 / 推荐管理
-3. **功能点 (feature)** — 叶子,具体动作或功能
+## 五层骨架 (v0.1 rev3)
 
-**三种约束承载并存** (per docs/feature-source-contract.md):
-- **轻**:\`## 描述\` 段写作规范(三个粗体小标题)
-- **中**:frontmatter 结构化字段 \`entities_touched\` / \`ownership\`
-- **重**:三个可选专门段 \`## 字段清单\` / \`## 状态转移\` / \`## 字段权限\`
+\`\`\`
+Project
+  ├── Actor               (项目级 first-class, actors/<id>.md)
+  ├── Entity              (existing, entities/<id>.md 或 modules/<m>/entities/<id>.md)
+  └── Domain → Capability (业务能力, capabilities/<id>.md, 跨 module 合法)
+              └── Function    (modules/<m>/features/<f>.md, 必须 capability_id 归属)
+                    └── UseCase  (modules/<m>/usecases/<scenario>.md, 可空)
+\`\`\`
 
-工作流要求:
+**Domain 预定义池** (规则 2): 招生 / 教务 / 财务 / 人事 / 数据集成 / 决策与报表 — 必从中选, 实在不属于的显式新增
+
+**module** 不再是结构骨架的一层, 只作物理目录 + 团队归属维度。 真正的层级是 domain → capability → function → usecase。
+
+## 强制规则
+
+1. **Function.id 产品内全局唯一** (规则 1) — 不能跨 module 重名
+2. **每个 function 必须有 capability_id** (规则 6a) — 不允许"无归属"function
+3. **每个 function 必须有 actor_ids[]** — 列出参与的 actor id, 这些 actor 必须先在 actors/ 中存在
+4. **Capability 粒度** (规则 8): 一个 capability 下 3-10 个 function 为健康
+5. **UseCase 拆分规则** (规则 7): 见 usecase-contract §3 — 同动作不同 actor 发起 / 不同前置条件 / 不同数据流向才拆, 不拆字段差/UI 差/状态机一边差
+
+## 工作流要求
+
 1. 先输出**生成计划**:
-   - 划几个业务方向 (module),每个 module 下几个 管理模块 (group)
-   - 每个 group 下挂哪些 feature
-   - 哪些 feature 是简单 feature(只填轻+中)、哪些复杂(还要填重形态)
+   - 列你要建几个 Actor (含 type / responsibilities)
+   - 列几个 Domain + 每个 Domain 下的 Capability (含 value_statement / actor_ids / entity_ids / priority)
+   - 每个 Capability 下挂哪些 Function (含 actor_ids / entities_touched)
+   - 哪些 Function 需要拆 UseCase (含 actor_id / scenario id / precondition)
    - 文件路径预览
 2. **等用户确认后再实际写文件**(用 Edit/Write 工具)
-3. 严格遵守"输出约定"
+3. 严格遵守输出约定
 4. 新建文件不加 needs_revision 标签
 `,
     warning,
@@ -676,6 +694,37 @@ ${statesLine}`
     "entities",
     "questions-decisions.yml"
   )) ?? "(无 questions-decisions.yml — 决策者尚未驳回过任何 question)";
+
+  // v0.1 rev3 第 6/7/8 类输入: Actor / Capability / UseCase (五层骨架)
+  const actors = await loadActors(productId);
+  const capabilities = await loadCapabilities(productId);
+  const usecases = await loadUseCases(productId);
+  const capabilitiesWithRefs = attachCapabilityRefs(
+    capabilities,
+    // 收集全部 function 用于反向聚合
+    (await Promise.all(modules.map((m) => loadFeatures(productId, m.name)))).flat()
+  );
+
+  const actorsText = actors.length === 0
+    ? "(无 — 项目级 actors/ 目录尚未建立, 五层骨架不完整)"
+    : actors
+        .map((a) => `- **${a.id}** [${a.type}]: ${a.name}${a.responsibilities ? ` — ${a.responsibilities}` : ""}`)
+        .join("\n");
+
+  const capabilitiesText = capabilitiesWithRefs.length === 0
+    ? "(无 — 项目级 capabilities/ 目录尚未建立)"
+    : capabilitiesWithRefs
+        .map((c) => {
+          const fns = c.function_ids.length > 0 ? c.function_ids.join(", ") : "(无 function)";
+          return `- **${c.id}** [${c.domain} · ${c.priority} · ${c.status}]: ${c.name} — actors: [${c.actor_ids.join(", ")}], entities: [${c.entity_ids.join(", ")}], functions: ${fns}\n  > ${c.value_statement}`;
+        })
+        .join("\n");
+
+  const usecasesText = usecases.length === 0
+    ? "(无 UseCase — function 都是简单形态, 没有场景化拆分)"
+    : usecases
+        .map((u) => `- **${u.module}/${u.function_id}::${u.id}** (actor: ${u.actor_id}): ${u.precondition ? `前置: ${u.precondition} | ` : ""}${u.postcondition ? `后置: ${u.postcondition}` : ""}`)
+        .join("\n");
   // 流程图 main.mmd 含已经规范化的 Entity 名,实体派生 Agent 必须与其严格一致。
   // 文件不存在 → 没有流程图作锚点,派生 Agent 自己挑名字,但要在派生计划中说明。
   const flowchartMmdText = (await readTextFile("products", productId, "derived", "flowcharts", "main.mmd")) ?? "(无 main.mmd — 该产品流程图尚未生成,实体命名请按 flowchart-contract §3.4 / §3.4.2 自行规范并在派生计划中说明映射表)";
@@ -790,6 +839,15 @@ ${rolesList}`,
     "```yaml",
     questionsDecisionsText,
     "```",
+    "",
+    "### actors/(项目级 Actor 池 — 五层骨架的 Actor 层)",
+    actorsText,
+    "",
+    "### capabilities/(业务能力 — Function 的归属层)",
+    capabilitiesText,
+    "",
+    "### modules/<m>/usecases/(业务场景 — Function 的子层, 可空)",
+    usecasesText,
     "",
     "### derived/flowcharts/main.mmd(已生成的流程图 — 实体命名锚点)",
     "派生实体的 name 必须与本文件中出现的 Entity 名严格一致(同 entity 不可起新名,不同 entity 不可合并)。",

@@ -54,27 +54,41 @@ function header(productMeta: ProductMeta | null, productId: string, scopeLabel: 
 }
 
 const FEATURE_TASK = `## 你的任务
-你是 Atlas 的功能点修订 Agent。根据下面的反馈,修订对应的 feature md 文件。
+你是 Atlas 的 Function 修订 Agent (v0.1 rev3 五层骨架: Actor / Capability / Function / UseCase / Entity)。
+根据下面的反馈, 修订对应的 function (feature.md) 文件 + 必要时拆 UseCase + 维护 Capability 归属。
 
 工作流要求:
-1. 先阅读完所有反馈和上下文,在响应里输出一份 diff plan(打算改什么、不改什么、为什么)
+1. 先阅读完所有反馈和上下文, 在响应里输出一份 diff plan
 2. **等用户确认后再实际写文件**(用 Edit/Write 工具)
-3. 写完每个文件后,在该文件:
+3. 写完每个 function 文件后:
    - 把 frontmatter 的 needs_revision 删除(或改为 false)
-   - **如果反馈影响了功能点的语义边界 / 关键取舍 / 决策者需要拍的事**,同步更新 \`## 给决策者\` 段(白话 3-5 行;不出现实体名/字段名/锚点);该段缺失则新建在 \`## 描述\` 之前
-   - **如果你改了 \`## 给决策者\` 内容,顺便把 frontmatter 的 \`reviewed_at\` / \`reviewed_by\` 字段删掉**(决策者视角变了 = 需要重新审阅)
+   - **必须有 \`capability_id\`** 字段(v0.1 必填), 引用 capabilities/<id>.md 中存在的 capability
+   - 优先用新字段 \`actor_ids\` (v0.1 rename from roles), 旧 \`roles\` 字段可同时保留
+   - **如果反馈影响了功能点的语义边界 / 关键取舍 / 决策者需要拍的事**, 同步更新 \`## 给决策者\` 段(白话 3-5 行;不出现实体名/字段名/锚点);该段缺失则新建在 \`## 描述\` 之前
+   - **如果你改了 \`## 给决策者\` 内容, 顺便把 frontmatter 的 \`reviewed_at\` / \`reviewed_by\` 字段删掉**(决策者视角变了 = 需要重新审阅)
    - 把 ## 反馈池 段清空为 \`[]\`
    - 在 ## 修订记录 段追加一行: "{today}: 基于 N 条反馈修订 - 简短说明"
-     (如果该 feature 没有 ## 修订记录 段,自己新建)
-4. 如果某条反馈你不采纳,在 diff plan 里说明理由,但仍要清理该条反馈
-   (否则 needs_revision 不会消失,下次 revise 会重复处理)
-5. 全局需求池条目处理完后,**直接编辑 GLOBAL-FEEDBACK.md** 清理:
-   - 在对应 yaml 块里删除已处理 gfb 条目(整段 \`- id: gfb-xxx ... content: ...\` 都删)
+4. **何时拆 UseCase** (按 docs/usecase-contract.md §3 规则 7):
+   - **拆**: 同动作不同 actor 发起 / 同动作不同前置条件(不同业务路径) / 同动作但数据流向 / 外部系统不同
+   - **不拆**: 仅字段差异 / 仅 UI 入口差异 / 仅状态机一条边差异
+   - 拆 UseCase 时: 新建文件 \`modules/<m>/usecases/<scenario>.md\` (文件名仅用 scenario 关键词, 不带 function_id 前缀)
+   - UseCase frontmatter 必须有 \`id / function_id / actor_id\`
+   - UseCase 主流程 / 备选流程在 body 的 \`## 主流程\` / \`## 备选流程\` H2 段中
+5. **何时新建 Function**:
+   - **必须先扫**同 capability 下 entities_touched ≥ 70% 重合 / name 相似度高的 function
+   - 找到 → 在 diff plan 里写明合并或区分理由
+   - 没说明 → 不允许新建。 默认行为是合并到已有 function (并入字段权限/状态分支/UseCase)
+   - 新建时 capability_id 必填, 不允许"无归属" function (规则 6a)
+6. **何时新建 Capability**:
+   - 如果反馈描述的 function 不属于任何已有 capability, 才新建 capability
+   - 新 capability frontmatter 必须有 \`id / name / domain / value_statement / actor_ids / entity_ids / priority / status: draft\`
+   - domain 从预定义池选: 招生 / 教务 / 财务 / 人事 / 数据集成 / 决策与报表(规则 2)
+   - 一个 capability 下 function 数 3-10 为健康 (规则 8)
+7. 全局需求池条目处理完后, **直接编辑 GLOBAL-FEEDBACK.md** 清理:
+   - 在对应 yaml 块里删除已处理 gfb 条目
    - 保留未处理 / 暂不采纳的条目
-   - 如果某条 gfb 你判断不采纳,在 diff plan 里说明理由,但仍然删除它
-     (否则下次 revise 会重复看到)
-   - 保留 frontmatter 的 \`last_updated\` 并更新为今天
-   - 三段(\`## 功能点需求\` / \`## 实体需求\` / \`## 原型需求\`)结构保持不变,空段写 \`[]\`
+   - 更新 frontmatter \`last_updated\` 为今天
+   - 三段结构保持不变, 空段写 \`[]\`
 `;
 
 const ENTITY_TASK = `## 你的任务
