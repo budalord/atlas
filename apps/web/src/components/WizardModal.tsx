@@ -146,7 +146,7 @@ export function WizardModal({ onClose, onCreated }: WizardModalProps) {
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex items-center justify-between border-b border-slate-200 px-6 py-3">
-          <h2 className="text-base font-semibold text-slate-900">🎉 新产品立项 Wizard · v0.1 rev3 五层骨架</h2>
+          <h2 className="text-base font-semibold text-slate-900">新产品立项 Wizard · 五层骨架</h2>
           <button
             className="rounded p-1 text-slate-400 hover:bg-slate-100"
             onClick={onClose}
@@ -220,7 +220,7 @@ export function WizardModal({ onClose, onCreated }: WizardModalProps) {
               onClick={() => void submit()}
               type="button"
             >
-              {submitting ? "落盘中..." : "🚀 落盘并创建"}
+              {submitting ? "落盘中..." : "落盘并创建"}
             </button>
           )}
         </footer>
@@ -772,7 +772,7 @@ function Step6({
 function Hint({ children }: { children: React.ReactNode }) {
   return (
     <div className="rounded-md border border-blue-200 bg-blue-50/60 px-3 py-2 text-[11px] leading-5 text-blue-900">
-      💡 {children}
+      {children}
     </div>
   );
 }

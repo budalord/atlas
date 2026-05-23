@@ -121,7 +121,7 @@ export function FeatureModal({
                     className="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-800"
                     title={`Capability: ${feature.capability_id}`}
                   >
-                    🎯 {feature.capability_id}
+                    {feature.capability_id}
                   </span>
                 </>
               ) : feature?.module_group ? (
@@ -131,7 +131,7 @@ export function FeatureModal({
                     className="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700"
                     title={`旧字段 module_group (v0.0): ${feature.module_group}, 应迁移到 capability_id`}
                   >
-                    ⚠ {feature.module_group}
+                    {feature.module_group}
                   </span>
                 </>
               ) : (
@@ -139,7 +139,7 @@ export function FeatureModal({
                   className="rounded bg-rose-50 px-1.5 py-0.5 text-rose-700"
                   title="未归属任何 Capability — l0 警告"
                 >
-                  ⚠ 未归属
+                  未归属
                 </span>
               )}
               <span className="font-mono text-slate-400">{featureId}</span>

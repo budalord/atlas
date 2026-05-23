@@ -232,7 +232,7 @@ function ActorDetail({
               </span>
             ) : (
               <span className="rounded border border-amber-300 bg-white px-2 py-0.5 text-[10px] font-medium text-amber-800">
-                📝 draft
+                draft
               </span>
             )}
           </div>

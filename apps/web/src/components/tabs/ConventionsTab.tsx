@@ -70,7 +70,7 @@ export function ConventionsTab({ productId, readOnly = false }: ConventionsTabPr
               onClick={() => setPromptOpen("generate")}
               type="button"
             >
-              📋 生成 L0 规范
+              生成 L0 规范
             </button>
           ) : null}
         </div>
@@ -104,7 +104,7 @@ export function ConventionsTab({ productId, readOnly = false }: ConventionsTabPr
             title="生成/更新 L0 规范 prompt(给规范 Agent)"
             type="button"
           >
-            📋 规范 Agent · 生成/更新 L0 规范
+            生成/更新 L0 规范
           </button>
         ) : null}
       </div>

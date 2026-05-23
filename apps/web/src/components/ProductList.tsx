@@ -62,7 +62,7 @@ export function ProductList({ products, selectedProductId, onSelect }: ProductLi
           type="button"
           title="5 层骨架(Actor / Capability / Function / UseCase / Entity)Wizard"
         >
-          🎉 立项 Wizard(五层骨架)
+          立项 Wizard · 五层骨架
         </button>
       </div>
 

@@ -342,7 +342,7 @@ function VisionPanel({ productId }: { productId: string }) {
 
   if (!vision || !vision.exists) return null;
   return (
-    <Card title="🎯 愿景">
+    <Card title="愿景">
       <MarkdownRenderer markdown={vision.content} />
     </Card>
   );

@@ -85,6 +85,16 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const mmRef = useRef<Markmap | null>(null);
   /**
+   * 用户折叠状态的快照: Map<nodeKey, isFolded>。
+   *
+   * 设计:
+   *   - 每个 markmap 节点 build 时挂 payload.nodeKey (基于业务 id 稳定生成)
+   *   - 用户点 circle 折叠 → snapshot 一次 → 写 foldStateRef
+   *   - 下次 setData(newTree) 前, 把 foldStateRef 的状态 patch 到新 tree 的 payload.fold
+   *   - 即可保留用户当前的展开/折叠状态, 不被 SSE 刷新重置
+   */
+  const foldStateRef = useRef<Map<string, boolean>>(new Map());
+  /**
    * 记录 mmRef 当前绑定的 SVG DOM 元素。当 React 重新挂载 SVG(产品切换 / 走过
    * "无 modules 树"占位再回来)时,这里的引用与 svgRef.current 不一致,需要先 destroy
    * 旧实例再 create 新实例,避免 d3 zoom 在脱离 DOM 的 SVG 上读取 SVGLength 抛错。
@@ -187,6 +197,8 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
       mmRef.current = null;
       mmSvgRef.current = null;
     }
+    // 用户已有折叠偏好 → 写入 tree.payload.fold, 让 markmap 渲染时遵循
+    const patchedTree = applyFoldState(JSON.parse(JSON.stringify(tree)), foldStateRef.current);
     if (!mmRef.current) {
       mmRef.current = Markmap.create(
         svg,
@@ -200,12 +212,12 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
           spacingVertical: 8,
           maxWidth: 320
         },
-        tree
+        patchedTree
       );
       mmSvgRef.current = svg;
     } else {
-      void mmRef.current.setData(tree);
-      void mmRef.current.fit();
+      // 不 fit() — 保留用户当前的缩放/平移状态
+      void mmRef.current.setData(patchedTree);
     }
   }, [tree]);
 
@@ -267,9 +279,15 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
     };
 
     const onClick = (e: MouseEvent) => {
-      // markmap-view circle 是折叠/展开控件,放过
+      // markmap-view circle 是折叠/展开控件,放过 — 但要在 markmap 处理完之后 snapshot 折叠状态
       const target = e.target as Element;
-      if (target && target.tagName === "circle") return;
+      if (target && target.tagName === "circle") {
+        // 等 markmap 动画完成再读 (300ms duration + 缓冲)
+        window.setTimeout(() => {
+          if (svgRef.current) snapshotFoldState(svgRef.current, foldStateRef.current);
+        }, 350);
+        return;
+      }
       // 先检 usecase, 再检 feature(usecase 节点也是叶, 但 payload 不同)
       const ucRef = findUseCaseRefAt(target);
       if (ucRef) {
@@ -343,7 +361,7 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
             onClick={() => setPromptOpen("generate")}
             type="button"
           >
-            📋 大 Agent · 生成功能点骨架
+            生成功能点骨架
           </button>
         ) : null}
         {promptOpen ? (
@@ -392,7 +410,7 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
             title="把 needs_revision=true 的 feature 反馈 + 全局需求 拼成 prompt 给 Claude Code 跑"
             type="button"
           >
-            📋 复制全局 revise prompt
+            复制全局 revise prompt
           </button>
         </div>
       </div>
@@ -606,6 +624,7 @@ function buildTreeV2(
       ` <span style="color:#94a3b8;font-size:0.85em">· ${caps.length} capability${p0Count > 0 ? ` · ${p0Count} P0` : ""}</span>`;
     domainNodes.push({
       content: label,
+      payload: { nodeKey: `domain:${domain}` },
       children: caps.map((cap) =>
         buildCapabilityNode(cap, allFunctions, usecases, roleIdToName)
       )
@@ -614,8 +633,9 @@ function buildTreeV2(
   if (orphanFunctions.length > 0) {
     domainNodes.push({
       content:
-        `<span style="font-weight:700;color:#dc2626">⚠ 未归类</span>` +
+        `<span style="font-weight:700;color:#dc2626">未归类</span>` +
         ` <span style="color:#94a3b8;font-size:0.85em">· ${orphanFunctions.length} 个 function 缺 capability_id</span>`,
+      payload: { nodeKey: `domain:_orphan` },
       children: orphanFunctions.map(({ feature, moduleId }) =>
         buildFeatureNode(feature, moduleId, roleIdToName)
       )
@@ -624,6 +644,7 @@ function buildTreeV2(
 
   return {
     content: escapeHtml(productName),
+    payload: { nodeKey: "root" },
     children: domainNodes
   };
 }
@@ -640,18 +661,20 @@ function buildCapabilityNode(
     .filter((x): x is { feature: ModuleWithFeatures["features"][number]; moduleId: string } => Boolean(x));
 
   const priorityColor = cap.priority === "P0" ? "#dc2626" : cap.priority === "P1" ? "#d97706" : "#64748b";
-  const statusBadge =
+  // 用色块代替 emoji — confirmed 为 emerald 实心 / draft 为灰色空心
+  const statusDot =
     cap.status === "confirmed"
-      ? `<span style="color:#059669;font-size:0.85em" title="status=confirmed">✅</span>`
-      : `<span style="color:#94a3b8;font-size:0.85em" title="status=draft">📝</span>`;
+      ? `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#059669;margin-left:4px;vertical-align:middle" title="已确认"></span>`
+      : `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;border:1px solid #94a3b8;margin-left:4px;vertical-align:middle" title="待确认"></span>`;
   const label =
     `<span style="font-weight:600">${escapeHtml(cap.name)}</span>` +
     ` <span style="color:${priorityColor};font-weight:600;font-size:0.85em">${cap.priority}</span>` +
-    ` ${statusBadge}`;
+    statusDot;
   return {
     content: label,
     payload: {
-      capabilityRef: { capabilityId: cap.id }
+      capabilityRef: { capabilityId: cap.id },
+      nodeKey: `cap:${cap.id}`
     },
     children: capFunctions.map(({ feature, moduleId }) =>
       buildFunctionNodeWithUseCases(feature, moduleId, usecases, roleIdToName)
@@ -679,7 +702,7 @@ function buildUseCaseNode(uc: UseCase, roleIdToName: Map<string, string>): IPure
   const actorName = roleIdToName.get(uc.actor_id) ?? uc.actor_id;
   const label =
     `<span style="color:#475569">${escapeHtml(uc.id)}</span>` +
-    ` <span style="color:#d97706;font-size:0.85em">@${escapeHtml(actorName)}</span>`;
+    ` <span style="color:#94a3b8;font-size:0.85em">· ${escapeHtml(actorName)}</span>`;
   return {
     content: label,
     payload: {
@@ -687,7 +710,8 @@ function buildUseCaseNode(uc: UseCase, roleIdToName: Map<string, string>): IPure
         module: uc.module,
         function_id: uc.function_id,
         usecase_id: uc.id
-      }
+      },
+      nodeKey: `uc:${uc.function_id}:${uc.id}`
     },
     children: []
   };
@@ -730,9 +754,42 @@ function buildFeatureNode(
   return {
     content: escapeHtml(f.name) + badgeSuffix + roleSuffix,
     payload: {
-      featureRef: { moduleId, featureId: f.id }
+      featureRef: { moduleId, featureId: f.id },
+      nodeKey: `fn:${f.id}`
     },
     children: []
   };
+}
+
+/**
+ * 递归把 foldStateMap 中存的折叠状态 patch 到 IPureNode tree 的 payload.fold 上,
+ * 让 markmap setData 时能恢复用户的折叠/展开偏好。
+ */
+function applyFoldState(node: IPureNode, foldMap: Map<string, boolean>): IPureNode {
+  const key = (node.payload as { nodeKey?: string } | undefined)?.nodeKey;
+  const folded = key ? foldMap.get(key) : undefined;
+  if (folded !== undefined) {
+    node.payload = { ...node.payload, fold: folded ? 1 : 0 };
+  }
+  if (node.children) {
+    node.children = node.children.map((c) => applyFoldState(c, foldMap));
+  }
+  return node;
+}
+
+/**
+ * 从当前 SVG 上读取所有 markmap-node 的折叠状态, 落到 foldStateMap。
+ * 触发时机: 用户点击 toggle circle 后微任务(等 markmap 内部完成 fold 更新)。
+ */
+function snapshotFoldState(svg: SVGSVGElement, foldMap: Map<string, boolean>) {
+  const nodes = svg.querySelectorAll(".markmap-node");
+  nodes.forEach((node) => {
+    const datum = (node as unknown as {
+      __data__?: { payload?: { nodeKey?: string; fold?: 0 | 1 } };
+    }).__data__;
+    const key = datum?.payload?.nodeKey;
+    if (!key) return;
+    foldMap.set(key, datum?.payload?.fold === 1);
+  });
 }
 

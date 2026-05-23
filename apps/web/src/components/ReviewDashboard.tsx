@@ -167,9 +167,9 @@ export function ReviewDashboard({ productId }: ReviewDashboardProps) {
     >
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-6 py-2 text-[12px]">
         {allPass ? (
-          <span className="font-semibold text-emerald-900">✅ 立项审查通过 — 可进入开发</span>
+          <span className="font-semibold text-emerald-900">立项审查通过 — 可进入开发</span>
         ) : (
-          <span className="font-medium text-slate-700">📋 立项审查进度</span>
+          <span className="font-medium text-slate-700">立项审查进度</span>
         )}
 
         <DashItem

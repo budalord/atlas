@@ -143,7 +143,7 @@ export function PromptModalDialog({
         <header className="flex items-center justify-between border-b border-slate-200 px-6 py-3">
           <div className="flex flex-col gap-0.5">
             <h2 className="text-base font-semibold text-slate-900">
-              📋 {MODE_TITLE[mode]} · {SCOPE_TITLE[scope]}
+              {MODE_TITLE[mode]} · {SCOPE_TITLE[scope]}
             </h2>
             {statsLine ? (
               <div className="text-[11px] text-slate-500">{statsLine}</div>

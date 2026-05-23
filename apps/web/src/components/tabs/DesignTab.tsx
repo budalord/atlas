@@ -151,7 +151,7 @@ export function DesignTab({ productId, readOnly = false, openName, onOpenDesign 
           title="基于现有 features 生成原型对应关系的 prompt(占位)"
           type="button"
         >
-          📋 原型 Agent · 生成原型对应
+          生成原型对应
         </button>
       </div>
       <div className="grid min-h-0 grid-cols-[260px_1fr]">
@@ -317,7 +317,7 @@ export function DesignTab({ productId, readOnly = false, openName, onOpenDesign 
         title="原型修订 prompt(本批次为占位)"
         type="button"
       >
-        📋 复制全局 revise prompt(原型)
+        复制全局 revise prompt(原型)
       </button>
       {promptOpen ? (
         <PromptModalDialog

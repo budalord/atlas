@@ -191,7 +191,7 @@ function GateBanner({
   const stillToReview = totalEntities - reviewedCount;
   return (
     <div className="border-b border-slate-200 bg-slate-50 px-5 py-2 text-[12px] text-slate-700">
-      📋 立项审查进度: 已审 <span className="font-semibold text-slate-900">{reviewedCount}</span> /{" "}
+      立项审查进度: 已审 <span className="font-semibold text-slate-900">{reviewedCount}</span> /{" "}
       {totalEntities} 实体
       {stillToReview > 0 ? <span> · 还需审 {stillToReview} 个</span> : null}
       {pendingQuestions > 0 ? (
@@ -234,7 +234,7 @@ function ToolBar({
           title="生成派生 prompt(复制后给 agent 跑) — 读功能点+规格+我已决策的需求"
           type="button"
         >
-          📋 {entitiesData.exists ? "更新实体" : "生成实体"}(读功能点 + 我的决策)
+          {entitiesData.exists ? "更新实体" : "生成实体"}(读功能点 + 我的决策)
         </button>
       ) : null}
     </div>
@@ -254,7 +254,7 @@ function EmptyState({ onOpenPrompt, readOnly }: { onOpenPrompt: () => void; read
           onClick={onOpenPrompt}
           type="button"
         >
-          📋 复制派生 prompt
+          复制派生 prompt
         </button>
       ) : null}
     </div>
@@ -285,7 +285,7 @@ function QuestionsSection({
       <header className="flex items-center justify-between bg-amber-50/60 px-5 py-2">
         <div className="flex items-center gap-2 text-[12px]">
           <span className="font-medium text-slate-900">
-            📋 派生 Agent 抛了 {questionsData.questions.length} 个 question
+            派生 Agent 抛了 {questionsData.questions.length} 个 question
           </span>
           <span className="text-slate-500">
             · 待决策 {pending.length} · 已决策 {decided.length}
@@ -390,7 +390,7 @@ function QuestionRow({
           </div>
           {question.proposed_resolution && !decided ? (
             <div className="mt-1 rounded border border-emerald-200 bg-emerald-50/60 px-2 py-1 text-[11px] text-emerald-800">
-              💡 agent 建议:{question.proposed_resolution}
+              agent 建议:{question.proposed_resolution}
             </div>
           ) : null}
           {decided ? (

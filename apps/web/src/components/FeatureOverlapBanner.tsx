@@ -12,7 +12,7 @@ interface FeatureOverlapBannerProps {
  *
  * 数据源: GET /api/products/:id/features/overlap-report
  * 用户操作:
- *   - "🔧 让 agent 处理" → POST overlap-act action=to-agent → 写全局需求池 feature 段
+ *   - "让 agent 处理" → POST overlap-act action=to-agent → 写全局需求池 feature 段
  *   - "✕ 忽略 (不是同一件事)" → POST overlap-act action=ignore → 写 sidecar overlap-ignored.yml
  * 决策后 SSE 触发刷新, 该组从列表消失(已落到全局需求池 / 已忽略)
  */
@@ -198,7 +198,7 @@ function OverlapGroupRow({
               title="把该组写入全局需求池 (feature 段), 让 agent 下轮 revise 时合并 / 区分"
               type="button"
             >
-              🔧 让 agent 处理
+              让 agent 处理
             </button>
             <button
               className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 hover:border-slate-500 disabled:opacity-50"
