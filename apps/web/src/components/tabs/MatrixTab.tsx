@@ -193,15 +193,25 @@ export function MatrixTab({ productId }: MatrixTabProps) {
                       className="border-b border-slate-200 px-1 py-2 text-left align-bottom font-medium text-slate-700"
                       title={`${col.name} (${col.id})`}
                     >
-                      <div
-                        className="flex h-[140px] flex-col items-start justify-end gap-1 whitespace-nowrap"
-                        style={{
-                          writingMode: "vertical-rl",
-                          transform: "rotate(180deg)"
-                        }}
-                      >
-                        <span className="text-[11px] text-slate-700">{col.name}</span>
-                        <code className="font-mono text-[9px] text-slate-400">{col.id}</code>
+                      <div className="flex h-[140px] flex-row items-end gap-1 whitespace-nowrap">
+                        {/* 中文名 — 字符直立, 上→下 */}
+                        <span
+                          className="text-[11px] text-slate-700"
+                          style={{
+                            writingMode: "vertical-rl",
+                            textOrientation: "upright",
+                            letterSpacing: "0.05em"
+                          }}
+                        >
+                          {col.name}
+                        </span>
+                        {/* 英文 id — 自然 90° 顺时针(头朝右), 上→下 */}
+                        <code
+                          className="font-mono text-[9px] text-slate-400"
+                          style={{ writingMode: "vertical-rl" }}
+                        >
+                          {col.id}
+                        </code>
                       </div>
                     </th>
                   ))}
