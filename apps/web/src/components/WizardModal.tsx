@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   ActorType,
   CapabilityPriority
@@ -66,13 +66,25 @@ const PRIORITIES: { value: CapabilityPriority; label: string }[] = [
 const DOMAIN_POOL = ["招生", "教务", "财务", "人事", "数据集成", "决策与报表"];
 
 const STEP_LABELS: Record<StepKey, string> = {
-  1: "1. 项目基础信息",
-  2: "2. Actor 识别",
-  3: "3. Entity 识别",
-  4: "4. Capability 生成",
-  5: "5. Function 拆解(可跳)",
+  1: "1. 项目基础",
+  2: "2. 角色识别",
+  3: "3. 实体识别",
+  4: "4. 能力生成",
+  5: "5. 功能拆解(可跳)",
   6: "6. 总览与一致性"
 };
+
+const THEME_OPTIONS = [
+  { value: "erp", label: "ERP (企业资源)" },
+  { value: "saas", label: "SaaS (订阅服务)" },
+  { value: "tool", label: "工具产品" },
+  { value: "portal", label: "门户 / 自助端" },
+  { value: "agent", label: "Agent 产品" },
+  { value: "custom", label: "其他" }
+];
+
+// localStorage 草稿持久化 — 单一草稿(覆盖式), key 固定
+const DRAFT_KEY = "atlas.wizard.draft.v1";
 
 /**
  * 立项 Wizard 6 步 (v0.1 rev3)
@@ -81,22 +93,32 @@ const STEP_LABELS: Record<StepKey, string> = {
  * 各步骤的 Agent 反问通过既有 PromptModalDialog scope=... 触发, 用户复制 prompt 喂 agent 后手动落库(本 Wizard 不内嵌 agent)。
  */
 export function WizardModal({ onClose, onCreated }: WizardModalProps) {
-  const [step, setStep] = useState<StepKey>(1);
-  const [project, setProject] = useState<ProjectInput>({
-    id: "",
-    name: "",
-    theme: "custom",
-    tagline: "",
-    description: "",
-    in_scope: [],
-    out_of_scope: []
-  });
-  const [actors, setActors] = useState<ActorInput[]>([]);
-  const [entities, setEntities] = useState<EntityInput[]>([]);
-  const [capabilities, setCapabilities] = useState<CapabilityInput[]>([]);
-  const [functions, setFunctions] = useState<FunctionInput[]>([]);
+  // 加载 localStorage 草稿(若有) — 单一草稿覆盖式
+  const draft = loadDraft();
+
+  const [step, setStep] = useState<StepKey>(draft?.step ?? 1);
+  const [project, setProject] = useState<ProjectInput>(
+    draft?.project ?? {
+      id: "",
+      name: "",
+      theme: "erp",
+      tagline: "",
+      description: "",
+      in_scope: [],
+      out_of_scope: []
+    }
+  );
+  const [actors, setActors] = useState<ActorInput[]>(draft?.actors ?? []);
+  const [entities, setEntities] = useState<EntityInput[]>(draft?.entities ?? []);
+  const [capabilities, setCapabilities] = useState<CapabilityInput[]>(draft?.capabilities ?? []);
+  const [functions, setFunctions] = useState<FunctionInput[]>(draft?.functions ?? []);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // 任何状态变更 → 写草稿
+  useEffect(() => {
+    saveDraft({ step, project, actors, entities, capabilities, functions });
+  }, [step, project, actors, entities, capabilities, functions]);
 
   // 推导 modules (从 function.module unique)
   const modules = useMemo(() => {
@@ -131,12 +153,25 @@ export function WizardModal({ onClose, onCreated }: WizardModalProps) {
         throw new Error(body.error ?? `HTTP ${res.status}`);
       }
       const json = await res.json();
+      clearDraft();
       onCreated(json.data.product_id);
     } catch (e) {
       setSubmitError(e instanceof Error ? e.message : "落盘失败");
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const resetDraft = () => {
+    if (!window.confirm("确认清空当前 Wizard 草稿? 已填的所有数据会被删除。")) return;
+    clearDraft();
+    setStep(1);
+    setProject({ id: "", name: "", theme: "erp", tagline: "", description: "", in_scope: [], out_of_scope: [] });
+    setActors([]);
+    setEntities([]);
+    setCapabilities([]);
+    setFunctions([]);
+    setSubmitError(null);
   };
 
   return (
@@ -146,16 +181,31 @@ export function WizardModal({ onClose, onCreated }: WizardModalProps) {
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex items-center justify-between border-b border-slate-200 px-6 py-3">
-          <h2 className="text-base font-semibold text-slate-900">新产品立项 Wizard · 五层骨架</h2>
-          <button
-            className="rounded p-1 text-slate-400 hover:bg-slate-100"
-            onClick={onClose}
-            type="button"
-          >
-            <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <path d="M6 18L18 6M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
+          <div className="flex items-baseline gap-3">
+            <h2 className="text-base font-semibold text-slate-900">新产品立项 Wizard · 五层骨架</h2>
+            <span className="text-[11px] text-slate-400" title="关闭窗口后, 已填内容自动保存到浏览器, 下次再开继续">
+              草稿已自动保存
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              className="rounded px-2 py-1 text-[11px] text-slate-500 hover:text-rose-700"
+              onClick={resetDraft}
+              title="清空当前 Wizard 所有已填内容"
+              type="button"
+            >
+              重置草稿
+            </button>
+            <button
+              className="rounded p-1 text-slate-400 hover:bg-slate-100"
+              onClick={onClose}
+              type="button"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path d="M6 18L18 6M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          </div>
         </header>
 
         {/* 进度条 + step nav */}
@@ -255,12 +305,17 @@ function Step1({ project, setProject }: { project: ProjectInput; setProject: (p:
         </Field>
       </div>
       <Field label="主题 (theme)">
-        <input
-          className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+        <select
+          className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-sm"
           onChange={(e) => setProject({ ...project, theme: e.target.value })}
-          placeholder="erp / saas / portal / ..."
           value={project.theme}
-        />
+        >
+          {THEME_OPTIONS.map((t) => (
+            <option key={t.value} value={t.value}>
+              {t.label}
+            </option>
+          ))}
+        </select>
       </Field>
       <Field label="标语 (tagline · 一句话)">
         <input
@@ -564,13 +619,23 @@ function Step5({
   actors: ActorInput[];
   entities: EntityInput[];
 }) {
+  // 从已有 functions 推导 module 候选 (去重) — 给 datalist 自动补全用
+  const moduleOptions = useMemo(() => {
+    const seen = new Set<string>();
+    for (const f of functions) {
+      const m = f.module.trim();
+      if (m) seen.add(m);
+    }
+    return Array.from(seen).sort();
+  }, [functions]);
+
   const add = () =>
     setFunctions([
       ...functions,
       {
         id: "",
         name: "",
-        module: "",
+        module: moduleOptions[0] ?? "",
         capability_id: capabilities[0]?.id ?? "",
         actor_ids: [],
         entities_touched: []
@@ -606,6 +671,7 @@ function Step5({
             </Field>
             <Field label="module (物理目录)" required compact span={2}>
               <input
+                list="wizard-module-list"
                 className="w-full rounded border border-slate-300 px-2 py-1 text-sm font-mono"
                 onChange={(e) =>
                   setFunctions(functions.map((x, i) => (i === idx ? { ...x, module: e.target.value } : x)))
@@ -671,6 +737,12 @@ function Step5({
       >
         + 添加 Function
       </button>
+      {/* datalist 提供 module 字段自动补全 — 同一产品多个 function 复用 module id */}
+      <datalist id="wizard-module-list">
+        {moduleOptions.map((m) => (
+          <option key={m} value={m} />
+        ))}
+      </datalist>
     </div>
   );
 }
@@ -905,6 +977,53 @@ function Stat({ label, value }: { label: string; value: string }) {
       <dd className="text-[13px] font-semibold text-slate-900">{value}</dd>
     </div>
   );
+}
+
+/* ============================================================
+ *  localStorage 草稿
+ * ============================================================ */
+interface WizardDraft {
+  step: StepKey;
+  project: ProjectInput;
+  actors: ActorInput[];
+  entities: EntityInput[];
+  capabilities: CapabilityInput[];
+  functions: FunctionInput[];
+}
+
+function loadDraft(): WizardDraft | null {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+    const obj = JSON.parse(raw) as Partial<WizardDraft>;
+    if (!obj.project) return null;
+    return {
+      step: (obj.step ?? 1) as StepKey,
+      project: obj.project,
+      actors: obj.actors ?? [],
+      entities: obj.entities ?? [],
+      capabilities: obj.capabilities ?? [],
+      functions: obj.functions ?? []
+    };
+  } catch {
+    return null;
+  }
+}
+
+function saveDraft(draft: WizardDraft): void {
+  try {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+  } catch {
+    // localStorage 满 / 禁用 → 静默, 草稿丢失可接受
+  }
+}
+
+function clearDraft(): void {
+  try {
+    localStorage.removeItem(DRAFT_KEY);
+  } catch {
+    // ignore
+  }
 }
 
 /* ============================================================
