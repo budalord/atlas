@@ -587,9 +587,22 @@ ENTITIES-OWNERSHIP / GLOBAL-FEEDBACK[entity 段] + questions-decisions.yml),产�
   - 必须把决策合入对应实体规格(字段必填性 / 关系建模 / 状态机分支 / 归属层 等)
   - 在被影响的实体 .md 的相关位置留 \`<!-- Agent note: 来自全局需求池 gfb-YYYYMMDD-xxxxxx -->\` 注释 trail
   - **本轮 questions.md 不要再以同样形式抛出该问题**
+  - **合入完成后, 直接编辑 \`GLOBAL-FEEDBACK.md\`, 在 \`## 实体需求\` yaml 块里删掉已合入的 gfb 条目**(跟 feature-revise 一致, 见下方"§ pool 清理"专段)。 池子里不该留已应用条目, 否则 UI 永远显示"N 条待处理"。
 - **questions-decisions.yml 中 status: rejected 的条目** = 决策者认为不是业务问题(agent 抛错了):
   - 同样的 question 本轮**不要再抛**
   - 该问题如果还需要处理, 自决(纯工程决策)或在 entity .md 加 Agent note 留 trail
+
+## § pool 清理(跟 feature-revise 一致)
+
+派生完成、所有 GLOBAL-FEEDBACK entity 段决策都合入 entity .md 后, **直接编辑 \`data/products/<productId>/GLOBAL-FEEDBACK.md\`**:
+
+1. \`## 实体需求\` yaml 块里, **删除本轮已合入的全部 gfb 条目**(留 \`<!-- Agent note -->\` 痕迹在 entity .md 已经足够追溯, pool 不该留死条目)
+2. 没合入的 / 你判断"暂不采纳"的条目: 保留, 但在 diff plan 里说明理由
+3. yaml 块为空时: 写 \`[]\`(不是删段)
+4. 更新 frontmatter \`last_updated\` 为今天日期(\`2026-MM-DD\` 格式)
+5. \`## 功能点需求\` / \`## 原型需求\` 两段你不要碰
+
+**为什么**: pool 是给"待 agent 处理"的队列, 不是决策档案。 决策档案在 entity .md 的 Agent note + DECISIONS.md。 池子留死条目会让决策者 UI 显示"N 条待处理"误导。
 
 ## § 实体 = schema(决策者反馈定型 · rev3)
 
