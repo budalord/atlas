@@ -103,7 +103,7 @@ export function EntityTab({ productId, readOnly = false }: EntityTabProps) {
 
       {entitiesData.stale ? (
         <div className="border-b border-amber-200 bg-amber-50 px-5 py-2 text-[12px] text-amber-900">
-          ⚠ 派生已过期:{entitiesData.stale_reason}
+          派生已过期:{entitiesData.stale_reason}
         </div>
       ) : null}
 
@@ -184,7 +184,7 @@ function GateBanner({
   if (gatePassed) {
     return (
       <div className="border-b border-emerald-200 bg-emerald-50 px-5 py-2.5 text-[13px] font-medium text-emerald-900">
-        ✅ 实体审查通过 ({reviewedCount}/{totalEntities} 已审 · 0 待决策 question) — 可进入原型 tab
+        实体审查通过 ({reviewedCount}/{totalEntities} 已审 · 0 待决策 question) — 可进入原型 tab
       </div>
     );
   }
@@ -292,7 +292,7 @@ function QuestionsSection({
           </span>
           {hasLint ? (
             <span className="rounded bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-800">
-              ⚠ 含 trigger lint 错误
+              含 trigger lint 错误
             </span>
           ) : null}
         </div>
@@ -557,7 +557,7 @@ function EntityCard({
                 className="rounded border border-sky-300 bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium text-sky-700"
                 title="7 天内派生, 尚未审"
               >
-                🆕
+                <span style={{fontSize: "10px"}}>新</span>
               </span>
             ) : null}
             {reviewed ? (
@@ -565,7 +565,7 @@ function EntityCard({
                 className="rounded border border-emerald-300 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-800"
                 title={`审阅人: ${entity.reviewedBy ?? "unknown"} · ${entity.reviewedAt ?? ""}`}
               >
-                ✅ 已审
+                已审
               </span>
             ) : null}
           </div>
@@ -586,7 +586,7 @@ function EntityCard({
             onClick={() => void toggleReview()}
             type="button"
           >
-            {submitting ? "..." : reviewed ? "↺ 取消已审" : "✅ 标已审"}
+            {submitting ? "..." : reviewed ? "取消已审" : "标已审"}
           </button>
         ) : null}
       </header>

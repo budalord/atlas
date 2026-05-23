@@ -138,12 +138,12 @@ export function FeatureHoverCard({
               className="rounded border border-emerald-300 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-800"
               title={`审阅日期: ${preview.reviewed_at}`}
             >
-              ✅ 已审
+              已审
             </span>
           ) : null}
           {preview.feedbackCount > 0 ? (
             <span className="rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
-              💬 {preview.feedbackCount}
+              反馈 {preview.feedbackCount}
             </span>
           ) : null}
           {preview.needs_revision ? (
@@ -151,7 +151,7 @@ export function FeatureHoverCard({
               className="rounded border border-rose-300 bg-rose-50 px-1.5 py-0.5 text-[10px] font-medium text-rose-800"
               title="frontmatter needs_revision=true · 等 Agent 重做"
             >
-              ⚠ 待 Agent
+              待 Agent
             </span>
           ) : null}
         </div>
@@ -186,8 +186,8 @@ export function FeatureHoverCard({
             {reviewSubmitting
               ? "处理中..."
               : preview.reviewed_at
-                ? `↺ 取消已审 (${preview.reviewed_at})`
-                : "✅ 标已审"}
+                ? `取消已审 (${preview.reviewed_at})`
+                : "标已审"}
           </button>
           <button
             type="button"

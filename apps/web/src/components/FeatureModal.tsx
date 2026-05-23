@@ -148,12 +148,12 @@ export function FeatureModal({
                   className="rounded border border-emerald-300 bg-emerald-50 px-1.5 py-0.5 text-emerald-800"
                   title={`审阅日期: ${feature.reviewed_at}${feature.reviewed_by ? " · " + feature.reviewed_by : ""}`}
                 >
-                  ✅ 已审
+                  已审
                 </span>
               ) : null}
               {feature?.needs_revision ? (
-                <span className="rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-amber-800">
-                  ⚠ 待 Agent 重做
+                <span className="rounded border border-rose-300 bg-rose-50 px-1.5 py-0.5 text-rose-800">
+                  待 Agent 重做
                 </span>
               ) : null}
             </div>

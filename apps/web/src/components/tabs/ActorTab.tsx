@@ -262,7 +262,7 @@ function ActorDetail({
         <div className="px-4 py-3">
           {actor.related_capability_ids.length === 0 ? (
             <div className="text-[11px] italic text-slate-400">
-              ⚠ 该 actor 未关联任何 capability — 检查是否漏写 capability.actor_ids
+              该 actor 未关联任何 capability — 检查是否漏写 capability.actor_ids
             </div>
           ) : (
             <ul className="space-y-1.5">
@@ -312,7 +312,7 @@ function ActorDetail({
                     </code>
                     {ent ? null : (
                       <span className="text-[10px] text-amber-700" title="实体未派生">
-                        ⚠ 未派生
+                        未派生
                       </span>
                     )}
                     <span className="text-[10px] text-slate-400">via {e.via.length} 处</span>

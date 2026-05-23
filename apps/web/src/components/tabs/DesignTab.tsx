@@ -230,7 +230,7 @@ export function DesignTab({ productId, readOnly = false, openName, onOpenDesign 
                   title="向 GitHub 提 issue"
                   type="button"
                 >
-                  💬
+                  反馈
                 </button>
                 {!readOnly && !editing ? (
                   <>

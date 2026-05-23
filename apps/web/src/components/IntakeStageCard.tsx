@@ -17,7 +17,7 @@ interface IntakeStageCardProps {
 }
 
 const badgeFor: Record<StageState, { label: string; tone: string }> = {
-  done: { label: "✅ 完成", tone: "border-emerald-300 bg-emerald-50 text-emerald-800" },
+  done: { label: "完成", tone: "border-emerald-300 bg-emerald-50 text-emerald-800" },
   active: { label: "⏳ 进行中", tone: "border-cyan-300 bg-cyan-50 text-cyan-800" },
   locked: { label: "⬜ 待执行", tone: "border-slate-300 bg-slate-50 text-slate-600" }
 };

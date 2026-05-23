@@ -206,7 +206,7 @@ export function ReviewDashboard({ productId }: ReviewDashboardProps) {
           }
           hint={
             data.features.needsRevision > 0
-              ? `${data.features.needsRevision} 个 ⚠ 待 agent 重做`
+              ? `${data.features.needsRevision} 个待 agent 重做`
               : data.features.feedbackCount > 0
                 ? `${data.features.feedbackCount} 条反馈`
                 : null

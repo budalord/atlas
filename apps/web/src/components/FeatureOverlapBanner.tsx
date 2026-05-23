@@ -59,7 +59,7 @@ export function FeatureOverlapBanner({ productId, readOnly = false }: FeatureOve
             <path d="M9 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
           <span className="font-medium text-amber-900">
-            ⚠ 重叠检测 · 发现 {data.groups.length} 组可能重复的 features
+            重叠检测 · 发现 {data.groups.length} 组可能重复的 features
           </span>
           {data.ignored_count > 0 ? (
             <span className="text-[10px] text-slate-500">· 已忽略 {data.ignored_count}</span>

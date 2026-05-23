@@ -725,7 +725,7 @@ function Step6({
 
       {(orphanActors.length > 0 || orphanEntities.length > 0 || emptyCapabilities.length > 0 || overflowCapabilities.length > 0) ? (
         <section className="rounded-md border border-amber-200 bg-amber-50/40 p-4">
-          <h3 className="text-sm font-semibold text-amber-900">⚠ 一致性提示</h3>
+          <h3 className="text-sm font-semibold text-amber-900">一致性提示</h3>
           <ul className="mt-2 space-y-1 text-[12px] text-amber-900">
             {orphanActors.length > 0 ? (
               <li>
@@ -759,7 +759,7 @@ function Step6({
         </section>
       ) : (
         <section className="rounded-md border border-emerald-200 bg-emerald-50/60 p-4 text-[12px] text-emerald-900">
-          ✅ 一致性检查通过
+          一致性检查通过
         </section>
       )}
     </div>

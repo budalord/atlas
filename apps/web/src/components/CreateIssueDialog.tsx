@@ -87,7 +87,7 @@ export function CreateIssueDialog({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
-          <h2 className="text-sm font-semibold text-slate-950">💬 向 GitHub 提 issue</h2>
+          <h2 className="text-sm font-semibold text-slate-950">向 GitHub 提 issue</h2>
           <button
             aria-label="关闭"
             className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900"

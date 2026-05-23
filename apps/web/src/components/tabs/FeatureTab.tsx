@@ -387,10 +387,10 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
             {data.reduce((acc, m) => acc + m.features.length, 0)}
           </span>{" "}
           个功能点 · 悬停叶节点看决策者视角 + 快速投反馈 · 点击看完整详情 ·{" "}
-          <span title="7 天内新建未审">🆕新增</span>{" "}
-          <span title="决策者已标已审">✅已审</span>{" "}
-          <span title="反馈池待 Agent 处理">💬反馈</span>{" "}
-          <span title="frontmatter needs_revision=true">⚠待 Agent</span>
+          <span className="text-sky-700" title="7 天内新建未审">新增</span>{" "}
+          <span className="text-emerald-700" title="决策者已标已审">已审</span>{" "}
+          <span className="text-amber-700" title="反馈池待 Agent 处理">反馈</span>{" "}
+          <span className="text-rose-700" title="frontmatter needs_revision=true">待 Agent</span>
         </div>
         <div
           className="relative flex-1 overflow-hidden border-t border-slate-200 bg-slate-50"
@@ -722,25 +722,27 @@ function buildFeatureNode(
   moduleId: string,
   roleIdToName: Map<string, string>
 ): IPureNode {
-  // 状态徽章拼接(顺序固定:🆕 / ✅ / 💬N / ⚠)
+  // 状态徽章拼接 — 用纯色文字标签替代 emoji (顺序: 新增 / 已审 / 反馈数 / 待 Agent)
+  // 样式: 小字, 颜色提示状态, 圆角浅色背景以与节点内容分隔
+  const badgeStyle = "font-size:0.75em;font-weight:600;padding:1px 5px;border-radius:3px;margin-left:4px;vertical-align:middle";
   const badges: string[] = [];
   const isNew = !f.reviewed_at && isRecentlyCreated(f.created_at);
   if (isNew) {
-    badges.push(`<span style="color:#0ea5e9;font-weight:600" title="7 天内新建,尚未审阅">🆕</span>`);
+    badges.push(`<span style="${badgeStyle};color:#0369a1;background:#e0f2fe" title="7 天内新建, 尚未审阅">新</span>`);
   }
   if (f.reviewed_at) {
     badges.push(
-      `<span style="color:#059669;font-weight:600" title="决策者已审 · ${escapeHtml(f.reviewed_at)}">✅</span>`
+      `<span style="${badgeStyle};color:#047857;background:#d1fae5" title="决策者已审 · ${escapeHtml(f.reviewed_at)}">已审</span>`
     );
   }
   if (f.feedbackCount > 0) {
     badges.push(
-      `<span style="color:#d97706;font-weight:600" title="${f.feedbackCount} 条反馈待 Agent 处理">💬${f.feedbackCount}</span>`
+      `<span style="${badgeStyle};color:#b45309;background:#fef3c7" title="${f.feedbackCount} 条反馈待 Agent 处理">反馈 ${f.feedbackCount}</span>`
     );
   }
   if (f.needs_revision) {
     badges.push(
-      `<span style="color:#dc2626;font-weight:600" title="frontmatter needs_revision=true · 等 Agent 重做">⚠</span>`
+      `<span style="${badgeStyle};color:#b91c1c;background:#fee2e2" title="frontmatter needs_revision=true · 等 Agent 重做">待 Agent</span>`
     );
   }
   const badgeSuffix = badges.length > 0 ? ` ${badges.join(" ")}` : "";

@@ -451,7 +451,7 @@ export function FeatureDrawer({
                             title="接受 draft → 覆盖原文件,pending 线索自动转 resolved 并打 [task:tid] 标记"
                             type="button"
                           >
-                            ✅ 接受 draft
+                            接受 draft
                           </button>
                           <button
                             className="rounded bg-rose-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-rose-700 disabled:opacity-60"
