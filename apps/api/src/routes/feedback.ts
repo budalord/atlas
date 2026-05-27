@@ -32,7 +32,8 @@ feedbackRouter.post("/", async (req, res, next) => {
     const parsedTarget = parseTargetString(target);
     if (!parsedTarget) {
       res.status(400).json({
-        error: '非法 target 格式;期望 "feature:<m>:<f>" / "entity:<e>" / "entity:<m>:<e>"'
+        error:
+          '非法 target 格式;期望 "feature:<m>:<f>" / "entity:<e>" / "entity:<m>:<e>" / "usecase:<m>:<fn>:<u>" / "screen:<m>:<s>"'
       });
       return;
     }

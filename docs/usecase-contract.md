@@ -48,6 +48,12 @@ precondition: 抖音渠道线索已转给合作商
 postcondition: 学员档案落库 + 学号生成 + 触发首单
 source: user_input                    # user_input | agent_suggested | inferred_from_function_name
 
+# ─── v0.2a 新增字段(系统维护, agent / loader 写入) ──────────
+needs_revision: true                  # 反馈池非空时由 feedbackWriter 自动写;agent revise 完毕自己删
+split_suggestion: |                   # agent revise 时若检测到拆分信号写入;UseCaseModal banner 提示用户决策, 用户处理后清除
+  步骤序列已达 14 步, 跨 [sales, finance, partner] 3 个主 actor, 建议拆为
+  「sales 发起退费申请」+「finance 三方审核」两个 usecase
+
 # ─── 不允许出现的字段 ────────────────────
 # ❌ related_function_ids   (单向: usecase → function)
 # ❌ secondary_actor_ids    (UseCase 只有 1 个主 actor, 其他角色在主流程步骤里说明)
@@ -66,6 +72,22 @@ source: user_input                    # user_input | agent_suggested | inferred_
 
 ## 备注
 <自由叙述, 如数据流向特殊点 / 外部系统集成方式 / 异常处理>
+
+## 反馈池
+(v0.2a 新增)由 UseCaseModal「记反馈」按钮 / feedbackWriter 维护, 与 feature/entity 同形态。
+
+```yaml
+- id: fb-20260527-a1b2c3
+  date: 2026-05-27
+  content: |
+    步骤 3 的字段校验规则需要明确手机号唯一性范围(同校区/全公司?)
+```
+
+空池写 `[]`。 agent revise 完毕将本段重置为空池, 并删除 frontmatter.needs_revision。
+
+## 修订记录
+(可选)agent revise 后追加一行:
+- 2026-05-27: 基于 N 条反馈修订 - 简短说明
 ```
 
 ### 2.1 必填字段说明
@@ -83,6 +105,8 @@ source: user_input                    # user_input | agent_suggested | inferred_
 | `entity_ids` | 继承 function.entities_touched | 可窄化(只列该 usecase 实际操作的实体) |
 | `precondition` | 空 | 触发该 usecase 的前置业务条件 |
 | `postcondition` | 空 | usecase 完成后的业务状态 |
+| `needs_revision` | 不存在 | 反馈池非空时由 feedbackWriter 自动写 `true`;反馈池全清后自动抹掉。 Agent revise 完毕可主动删 |
+| `split_suggestion` | 不存在 | Agent revise 时若发现违反 §3 拆分规则(步骤超 12 / 跨多个流程目标 / 跨多个主导 entity), 在此字段写一行建议。 UseCaseModal 顶部 banner 展示, 用户做拆分决策后 PATCH `split_suggestion: null` 清除 |
 
 ---
 
@@ -107,6 +131,10 @@ source: user_input                    # user_input | agent_suggested | inferred_
 ### 3.3 边界判断公式
 
 > 如果一个 usecase 跟另一个 usecase 的**主流程步骤超过 2 步不同**, 或**precondition 不同导致进入路径完全不同**, 或**postcondition 涉及完全不同的下游系统** → 拆。 否则合并到 function.<相应段> 表达。
+
+### 3.4 步骤数上限(v0.2a)
+
+UseCase Revise prompt 写入 usecase body Section A 步骤序列时, **目标 8 步**, **超过 12 步触发拆分建议**(agent 写入 frontmatter.split_suggestion, 由人决策)。 步骤过长往往意味着该 usecase 实际承载了多个流程目标 / 跨多个主导 entity, 需要按 §3.1 拆分规则重新切分。
 
 ---
 
@@ -167,3 +195,4 @@ usecase-contract.md (本文档)
 ### 修改 trail
 
 - 2026-05-23: 初稿 v0.1 (rev3 五层骨架重构, 见 plan-generic-elephant.md)
+- 2026-05-27: v0.2a — 引入 ## 反馈池 段 + frontmatter.needs_revision / split_suggestion 字段; §3.4 步骤数上限规则; 同步落地 buildUseCaseRevisePrompt / UseCaseModal「记反馈」+「revise prompt」按钮

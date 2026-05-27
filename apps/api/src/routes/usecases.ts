@@ -133,6 +133,13 @@ usecasesRouter.patch(
         return;
       }
       const body = (req.body ?? {}) as Record<string, unknown>;
+      // split_suggestion: null 或 "" → 清除;非空字符串 → 设置
+      const splitSuggestionPatch =
+        body.split_suggestion === null || body.split_suggestion === ""
+          ? { split_suggestion: undefined }
+          : typeof body.split_suggestion === "string"
+            ? { split_suggestion: body.split_suggestion.trim() }
+            : {};
       const updated: UseCase = {
         ...existing,
         ...(typeof body.actor_id === "string" && body.actor_id.trim()
@@ -147,7 +154,8 @@ usecasesRouter.patch(
         ...(typeof body.postcondition === "string"
           ? { postcondition: body.postcondition.trim() || undefined }
           : {}),
-        ...(typeof body.body === "string" ? { body: body.body } : {})
+        ...(typeof body.body === "string" ? { body: body.body } : {}),
+        ...splitSuggestionPatch
       };
       await writeUseCase(productId, updated);
       bumpDataVersion(

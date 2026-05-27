@@ -16,7 +16,9 @@ export type PromptScope =
   | "entity-derive"
   | "prototype"
   | "conventions"
-  | "actor";
+  | "actor"
+  | "usecase"
+  | "screen";
 
 export type PromptMode = "revise" | "generate";
 
@@ -30,6 +32,8 @@ interface PromptModalDialogProps {
 interface PromptStats {
   features_with_revision?: number;
   entities_with_revision?: number;
+  usecases_with_revision?: number;
+  screens_with_revision?: number;
   global_count?: number;
   has_description?: boolean;
   features_count?: number;
@@ -48,7 +52,9 @@ const SCOPE_TITLE: Record<PromptScope, string> = {
   "entity-derive": "Path C 派生实体",
   prototype: "原型",
   conventions: "L0 规范",
-  actor: "Actor 角色"
+  actor: "Actor 角色",
+  usecase: "用例",
+  screen: "界面屏"
 };
 
 const MODE_TITLE: Record<PromptMode, string> = {
@@ -226,8 +232,15 @@ function renderStats(mode: PromptMode, scope: PromptScope, stats: PromptStats): 
     const reviseCount =
       scope === "feature"
         ? stats.features_with_revision ?? 0
-        : stats.entities_with_revision ?? 0;
-    return `需要修订: ${reviseCount} 个  ·  全局需求: ${stats.global_count ?? 0} 条`;
+        : scope === "usecase"
+          ? stats.usecases_with_revision ?? 0
+          : scope === "screen"
+            ? stats.screens_with_revision ?? 0
+            : stats.entities_with_revision ?? 0;
+    const globalSuffix = scope === "usecase" || scope === "screen"
+      ? ""
+      : `  ·  全局需求: ${stats.global_count ?? 0} 条`;
+    return `需要修订: ${reviseCount} 个${globalSuffix}`;
   }
   const parts: string[] = [];
   if (stats.has_description !== undefined) {

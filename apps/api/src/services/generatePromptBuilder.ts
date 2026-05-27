@@ -23,7 +23,8 @@ export type GenerateScope =
   | "entity"
   | "conventions"
   | "prototype"
-  | "entity-derive";
+  | "entity-derive"
+  | "screen";
 
 export interface GenerateResult {
   prompt: string;
@@ -764,16 +765,151 @@ async function readEntityContractText(): Promise<string> {
 }
 
 
-export async function buildPrototypeGeneratePrompt(productId: string): Promise<GenerateResult> {
+/**
+ * Screen Generate prompt (v0.1 / 原 prototype 占位实化)。
+ *
+ * 设计:
+ *   - Step 1 强制拆分判断, 2 个锚定反例避免合并偏向
+ *   - Step 2 按 schema 产出 Screen markdown
+ *   - usecase 信息密度不足 → **降级而非 STOP**: 输出 draft + 弱信号标注 + 反馈池追加 revise 建议
+ *   - 读盘风格: prompt 不内联 usecase 全文, agent 自己读 modules/<m>/usecases/*.md
+ */
+export async function buildScreenGeneratePrompt(productId: string): Promise<GenerateResult> {
   const meta = await loadMeta(productId);
   const stats = await collectStats(productId);
-  const placeholder = [
-    header(meta, productId, "原型"),
-    "## 占位提示词",
-    "原型生成 prompt 模板将在后续轮次定义,当前占位。",
+  const usecases = await loadUseCases(productId);
+  const usecasesIndex = usecases
+    .map((u) => `- **${u.module}/${u.id}** (function: ${u.function_id}, actor: ${u.actor_id})${u.precondition ? ` · 前置: ${u.precondition}` : ""}`)
+    .join("\n");
+  const workdir = path.join(atlasRoot, "data", "products", productId);
+
+  const prompt = [
+    header(meta, productId, "界面屏 Screen 生成"),
+    AGENT_SELF_DECISION_PRINCIPLE,
     "",
-    "## 当前已知信息",
-    describeProduct(meta, productId)
+    `## 你的任务
+
+你是 Atlas 的 Screen 推导 Agent (v0.1 双轨设计 · 界面轨)。 任务:基于产品现有 usecase + entity, 识别应当抽象为 Screen 的 usecase 簇, 产出 \`modules/<m>/screens/<screen-id>.md\` 文件。
+
+**工作目录**: ${workdir}/
+
+## Step 1 · 拆分判断(强制先输出)
+
+在产出任何 Screen md 之前, 先扫所有 usecase, 决定:**这些 usecase 应该映射到几个 Screen?**
+
+判断标准(3 档定性):
+- **字段几乎一致 + 同一类用户视角** → 合并为一个 Screen
+- **字段部分重合 + 操作目的不同** → 拆为多个 Screen
+- **字段几乎不重合 / 跨多角色 + 视图差异显著** → 各自独立 Screen
+
+### 锚定反例 1(应拆)
+\`douyin-enrollment\` / \`offline-enrollment\` / \`student-profile-edit\` 三个 usecase 都涉及 Student 实体, 但:
+- 前两个是**录入流程**(字段密集 + 表单 + 校验), 一个 Screen「学员录入页」
+- 后一个是**档案查看 + 局部编辑**(字段稀疏 + 只读为主 + 权限分级), 另一个 Screen「学员档案页」
+→ 拆 2 个 Screen, 而非合 1 个
+
+### 锚定反例 2(不应拆)
+\`refund-by-sales-wechat\` / \`refund-by-sales-bank-transfer\` 两个 usecase 都是销售发起的退费, 仅退款渠道不同(微信 vs 对公转账)。
+- 字段几乎一致(原因 / 金额 / 凭证)
+- 同一 actor 视角
+→ 合 1 个 Screen「退费申请页」, 不拆
+
+**默认偏向**: 模型容易"合并偏向"(token 省 + 看起来整洁), 你**应当主动拆**, 除非两个 usecase 真的字段几乎一致 + 同视角。
+
+### Step 1 输出格式
+
+\`\`\`
+## 拆分判断
+- 候选 Screen 数: N
+- Screen 列表:
+  1. {screen-id-1} (module: <m>): 承接 [usecase-a, usecase-b]
+     - 拆分理由: ...
+  2. {screen-id-2} (module: <m>): 承接 [usecase-c]
+     - 拆分理由: ...
+- 跨 module 共享屏(若有): {screen-id-x} module: shared
+\`\`\`
+
+## Step 2 · 为每个 Screen 生成 markdown
+
+**先输出 diff plan**, 等用户确认后再 Edit/Write。
+
+### 文件位置
+\`modules/<module-id>/screens/<screen-id>.md\` — 单 module 屏放对应 module
+\`modules/shared/screens/<screen-id>.md\` — 跨模块共享屏放 shared 目录(若 shared 目录不存在则 mkdir)
+
+### Frontmatter Schema(严格)
+
+\`\`\`yaml
+---
+id: <kebab-case>                  # 必填, module 内唯一
+name: <中文名>                    # 必填
+module: <module-id>               # 必填, 或 "shared"
+usecase_ids:                      # 必填至少 1
+  - <usecase-id-1>
+entity_visibility:                # 必填至少 1 个 entity
+  <EntityName>:
+    default: [<field1>, <field2>] # 所有 actor 默认露出
+    role_gated:                   # 可选, 按 actor id gate
+      <actor_id>: [<field-x>]
+    derived_fields: [<label>]     # 可选, 派生字段单列(必须为 entity 字段表中 derived 标记的字段)
+prototype_url: null               # 留 null, 不写 Figma 链接
+preview_image: null               # 留 null
+added_in_phase: planning
+added_at: <YYYY-MM-DD>
+---
+\`\`\`
+
+### Body 7 段(缺一不可)
+
+1. **## 用途** — 一句话
+2. **## 拆分理由** — 来自 Step 1 输出
+3. **## 信息架构** — 顶部 / 主体 / 侧栏 / 底部各承载什么(纯文本, 不写 CSS)
+4. **## 字段可见性补充说明** — 仅当 frontmatter 矩阵不够表达时用(如"管理员视图下 id_number 仅在编辑模式露出"); 否则写"(略, 见 frontmatter.entity_visibility)"
+5. **## 状态变体** — \`loaded\` / \`empty\` / \`loading\` / \`error\` / \`no_permission\` 每个状态界面表达
+6. **## 设计决策** — 关键 trade-off
+7. **## 反馈池** — 空池:\`\`\`yaml\\n[]\\n\`\`\`
+
+## 信息密度不足时 — 降级(不阻断)
+
+若某 usecase 缺乏 Section A 步骤序列 / Section A 中无字段读写 / entity 字段表为空, **不要 STOP**, 改为:
+- 仍产出该 Screen 的 markdown 草稿
+- frontmatter 增加: \`needs_revision: true\`
+- body 第 6 段「设计决策」中标注:\`⚠️ 以下字段基于 feature.entities_touched 推断, usecase 未明确 — 信号弱, 建议先 revise usecase\`
+- 同步往对应 usecase 反馈池追加一条:\`Screen <screen-id> 生成时发现本 usecase 信息密度不足, 需要补 Section A 字段读写信息\`
+  (通过 \`POST /api/products/${productId}/feedback\` body \`{ target: "usecase:<m>:<fn>:<u>", content: "..." }\`)
+
+## 强约束
+
+- 所有字段名**必须**来自 entity \`## 字段\` markdown 表(读 \`derived/entities/<EntityName>.md\`), 不发明
+- \`entity_visibility.<E>.default\` 必须覆盖本 screen 所承接的所有 usecase Section A 「字段读写」中标 W (写) 的字段
+- \`derived_fields\` 中的字段必须在 entity 字段表中标 derived
+- 跨 module 共享屏(\`module: shared\`)不可由 agent 自动合并 — 若发现两个 module 的 usecase 共享一屏, **写入 frontmatter \`split_suggestion: "..."\` 字段交人决策, 不自行 mkdir shared/**(本期 shared/ 目录仅在用户明确意图时创建)
+
+## 禁止
+
+- 写 Figma 链接 / 设计稿 url(\`prototype_url\` 留 null, 后续手动填)
+- 写 CSS / 颜色值 / 字体规格 / 像素值
+- 引用 usecase 未涉及的 entity 字段
+- 自动跨 module 合并 Screen
+- 把 ui_states 列在 frontmatter(本期降到 body \`## 状态变体\` 段)
+
+## 当前产品的 usecase 索引(供拆分判断扫描)
+
+${usecases.length === 0 ? "(无 — 请先 revise / 补 usecase 后再来生成 Screen)" : usecasesIndex}
+
+## 当前产品的 entity 索引
+
+读 \`derived/entities/\` 下 PascalCase 文件名, 字段在 \`## 字段\` markdown 表中(parser 已经能解, 用 grep / Read 自己取)。
+`
   ].join("\n");
-  return { prompt: placeholder, stats };
+
+  return { prompt, stats };
+}
+
+/**
+ * v0.1 兼容别名 — 旧 scope "prototype" 仍可调用, 内部转发到 Screen generate。
+ * v0.2 完成迁移后可删。
+ */
+export async function buildPrototypeGeneratePrompt(productId: string): Promise<GenerateResult> {
+  return buildScreenGeneratePrompt(productId);
 }

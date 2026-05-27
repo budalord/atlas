@@ -17,6 +17,7 @@ import { tasksRouter } from "./routes/tasks";
 import { intakeRouter } from "./routes/intake";
 import { productsRouter } from "./routes/products";
 import { productSpecRouter, specRouter } from "./routes/spec";
+import { screensRouter } from "./routes/screens";
 import { usecasesRouter } from "./routes/usecases";
 import { wizardRouter } from "./routes/wizard";
 import { DATA_ROOT } from "./services/fileReader";
@@ -56,6 +57,7 @@ app.get("/api/events", (req, res) => {
 app.use("/api/products/:id/actors", actorsRouter);
 app.use("/api/products/:id/capabilities", capabilitiesRouter);
 app.use("/api/products/:id/usecases", usecasesRouter);
+app.use("/api/products/:id/screens", screensRouter);
 app.use("/api/products/:id/entities", entitiesRouter);
 app.use("/api/products/:id/features", featuresRouter);
 app.use("/api/products/:id/feedback", feedbackRouter);

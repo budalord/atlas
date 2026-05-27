@@ -10,6 +10,7 @@ import {
   readTextFile
 } from "./fileReader";
 import { parseMarkdownWithFrontmatter } from "./markdownParser";
+import { parseFeedbackSection } from "./feedbackParser";
 
 /**
  * UseCase loader · 业务场景 (`modules/<m>/usecases/<scenario>.md`)。
@@ -27,6 +28,10 @@ interface UseCaseFrontmatter {
   precondition?: unknown;
   postcondition?: unknown;
   source?: unknown;
+  /** 反馈池非空时由 feedbackWriter 自动写 true;Agent revise 完毕自己删。 */
+  needs_revision?: unknown;
+  /** agent revise 时若检测到拆分信号写入;用户在 UseCaseModal 上处理后清除。 */
+  split_suggestion?: unknown;
 }
 
 const VALID_SOURCES = new Set(["user_input", "agent_suggested", "inferred_from_function_name"]);
@@ -126,6 +131,12 @@ export function parseUseCase(
   const source$ = VALID_SOURCES.has(sourceRaw)
     ? (sourceRaw as UseCase["source"])
     : undefined;
+  const needs_revision = fm.needs_revision === true;
+  const split_suggestion = typeof fm.split_suggestion === "string" && fm.split_suggestion.trim().length > 0
+    ? fm.split_suggestion.trim()
+    : undefined;
+  const body = parsed.body.trim();
+  const feedback = parseFeedbackSection(body);
   return {
     id,
     module: moduleName,
@@ -135,7 +146,10 @@ export function parseUseCase(
     ...(precondition ? { precondition } : {}),
     ...(postcondition ? { postcondition } : {}),
     ...(source$ ? { source: source$ } : {}),
-    body: parsed.body.trim()
+    ...(needs_revision ? { needs_revision } : {}),
+    ...(split_suggestion ? { split_suggestion } : {}),
+    ...(feedback.length > 0 ? { feedback } : {}),
+    body
   };
 }
 
@@ -153,6 +167,8 @@ export async function writeUseCase(productId: string, uc: UseCase): Promise<void
   if (uc.precondition) fmObj.precondition = uc.precondition;
   if (uc.postcondition) fmObj.postcondition = uc.postcondition;
   if (uc.source) fmObj.source = uc.source;
+  if (uc.needs_revision) fmObj.needs_revision = true;
+  if (uc.split_suggestion) fmObj.split_suggestion = uc.split_suggestion;
   const fmText = YAML.stringify(fmObj).trim();
   const body = uc.body.trim();
   const content = `---\n${fmText}\n---\n\n${body}\n`;

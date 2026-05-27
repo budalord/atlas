@@ -518,7 +518,77 @@ export interface UseCase {
   precondition?: string;
   postcondition?: string;
   source?: "user_input" | "agent_suggested" | "inferred_from_function_name";
-  body: string;                     // ## 主流程 / ## 备选流程 / ## 备注
+  body: string;                     // ## 主流程 / ## 备选流程 / ## 备注 / ## 反馈池 / ## 修订记录
+  /** 反馈池条目,由 parseFeedbackSection(body) 解析。 */
+  feedback?: Feedback[];
+  /** frontmatter 字段:反馈池非空时由 feedbackWriter 自动写 true;Agent revise 完毕自己删。 */
+  needs_revision?: boolean;
+  /** frontmatter 字段:agent revise 时若发现步骤序列超 12 步等拆分信号,写入建议;用户处理后清除。 */
+  split_suggestion?: string;
+}
+
+/**
+ * Screen — 界面屏 (`modules/<m>/screens/<screen-id>.md`)。
+ * v0.1 界面轨基本粒度, 与 usecase 形成 M:N 对齐。
+ * 见 docs/screen-contract.md。
+ */
+export interface ScreenEntityVisibility {
+  /** 所有 actor 默认露出的字段(必填) */
+  default: string[];
+  /** 按 actor id gate 的字段 (可选): { admin: [id_number, contract_amount], ... } */
+  role_gated?: Record<string, string[]>;
+  /** 派生字段单独列(可选): 来自 entity 字段表中 D 标记的字段 */
+  derived_fields?: string[];
+}
+
+export interface Screen {
+  id: string;                       // kebab-case, module 内唯一
+  name: string;                     // 人类可读
+  module: string;                   // module id 或 "shared"(跨模块共享屏)
+  usecase_ids: string[];            // 必填至少 1; 单向真源, usecase 不存反查
+  /** 字段可见性矩阵: entityName → ScreenEntityVisibility */
+  entity_visibility: Record<string, ScreenEntityVisibility>;
+  /** Figma / 外链, 可选 */
+  prototype_url?: string;
+  /** 静态预览图相对路径或 url, 可选 */
+  preview_image?: string;
+  added_in_phase?: "planning" | "in-progress" | "live";
+  added_at?: string;
+  body: string;                     // ## 用途 / ## 拆分理由 / ## 信息架构 / ## 字段可见性补充说明 / ## 状态变体 / ## 设计决策 / ## 反馈池
+  /** body 反馈池解析 */
+  feedback?: Feedback[];
+  /** 反馈池非空时自动写 */
+  needs_revision?: boolean;
+}
+
+export interface ScreenSummary {
+  id: string;
+  name: string;
+  module: string;
+  usecase_ids: string[];
+  needs_revision?: boolean;
+}
+
+/**
+ * Screen ↔ UseCase / Entity 反向聚合视图(loader 运行时算, 不入盘)。
+ */
+export interface ScreenWithRefs extends Screen {
+  /** 引用此 screen 的 usecase 走单向真源, 这里反查 — 实际上 screen 引用 usecase, 反向就是 "本 screen 承接的 usecase 列表"(=usecase_ids), 不需要额外字段 */
+}
+
+/**
+ * Screen 加载时的校验结果。 阻断级 (loader 抛错) 与视图级 (暴露不阻断) 分离。
+ */
+export interface ScreenValidationIssue {
+  level: "error" | "warning";
+  screenId: string;
+  module: string;
+  rule:
+    | "usecase-not-found"
+    | "entity-not-referenced-by-usecase"
+    | "field-not-in-entity-fields-table"
+    | "orphan-screen";
+  detail: string;
 }
 
 /**

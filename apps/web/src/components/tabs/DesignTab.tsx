@@ -10,6 +10,7 @@ import { CreateIssueDialog } from "../CreateIssueDialog";
 import { MarkdownRenderer } from "../MarkdownRenderer";
 import { GlobalFeedbackPanel } from "../GlobalFeedbackPanel";
 import { PromptModalDialog, type PromptMode } from "../PromptModalDialog";
+import { ScreenList } from "../ScreenList";
 
 interface DesignTabProps {
   productId: string;
@@ -25,7 +26,11 @@ interface DesignTabProps {
  * - 右侧渲染 markdown,可读写时支持编辑/保存
  * - 顶部「+ 为某 feature 新建」按钮
  */
+type DesignView = "screens" | "designs";
+
 export function DesignTab({ productId, readOnly = false, openName, onOpenDesign }: DesignTabProps) {
+  // v0.1 双轨设计: 默认进 Screens 子视图 (新主力); design.md 是 v0.0 遗留, 仍可读写
+  const [view, setView] = useState<DesignView>("screens");
   const [list, setList] = useState<DesignSummary[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [doc, setDoc] = useState<DesignDoc | null>(null);
@@ -144,16 +149,48 @@ export function DesignTab({ productId, readOnly = false, openName, onOpenDesign 
   return (
     <div className="relative flex min-h-0 flex-col">
       <GlobalFeedbackPanel productId={productId} scope="prototype" />
-      <div className="flex items-center justify-end border-b border-slate-200 bg-slate-50 px-5 py-1.5">
-        <button
-          className="rounded border border-slate-300 bg-white px-3 py-1 text-[11px] font-medium text-slate-700 hover:border-slate-900 hover:text-slate-900"
-          onClick={() => setPromptOpen("generate")}
-          title="基于现有 features 生成原型对应关系的 prompt(占位)"
-          type="button"
-        >
-          生成原型对应
-        </button>
+      <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-5 py-1.5">
+        {/* segmented control: Screens(主) vs Designs(遗留 design.md) */}
+        <div className="inline-flex overflow-hidden rounded border border-slate-300 bg-white text-[11px]">
+          <button
+            className={`px-3 py-1 font-medium transition ${
+              view === "screens"
+                ? "bg-slate-900 text-white"
+                : "text-slate-700 hover:bg-slate-100"
+            }`}
+            onClick={() => setView("screens")}
+            type="button"
+          >
+            Screens
+          </button>
+          <button
+            className={`border-l border-slate-300 px-3 py-1 font-medium transition ${
+              view === "designs"
+                ? "bg-slate-900 text-white"
+                : "text-slate-700 hover:bg-slate-100"
+            }`}
+            onClick={() => setView("designs")}
+            type="button"
+            title="v0.0 遗留的 design.md 浏览;新工作走 Screens"
+          >
+            Designs (遗留)
+          </button>
+        </div>
+        {view === "designs" ? (
+          <button
+            className="rounded border border-slate-300 bg-white px-3 py-1 text-[11px] font-medium text-slate-700 hover:border-slate-900 hover:text-slate-900"
+            onClick={() => setPromptOpen("generate")}
+            title="基于现有 features 生成原型对应关系的 prompt(已转发到 Screen generate)"
+            type="button"
+          >
+            生成原型对应
+          </button>
+        ) : null}
       </div>
+
+      {view === "screens" ? (
+        <ScreenList productId={productId} readOnly={readOnly} />
+      ) : (
       <div className="grid min-h-0 grid-cols-[260px_1fr]">
       <aside className="border-r border-slate-200 bg-white">
         <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
@@ -311,14 +348,17 @@ export function DesignTab({ productId, readOnly = false, openName, onOpenDesign 
         />
       ) : null}
       </div>
-      <button
-        className="fixed bottom-4 right-4 z-30 rounded-full bg-slate-900 px-4 py-2 text-xs font-medium text-white shadow-lg hover:bg-slate-800"
-        onClick={() => setPromptOpen("revise")}
-        title="原型修订 prompt(本批次为占位)"
-        type="button"
-      >
-        复制全局 revise prompt(原型)
-      </button>
+      )}
+      {view === "designs" ? (
+        <button
+          className="fixed bottom-4 right-4 z-30 rounded-full bg-slate-900 px-4 py-2 text-xs font-medium text-white shadow-lg hover:bg-slate-800"
+          onClick={() => setPromptOpen("revise")}
+          title="原型修订 prompt(已转发到 Screen revise)"
+          type="button"
+        >
+          复制全局 revise prompt(原型)
+        </button>
+      ) : null}
       {promptOpen ? (
         <PromptModalDialog
           mode={promptOpen}

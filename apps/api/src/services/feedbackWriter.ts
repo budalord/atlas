@@ -22,11 +22,13 @@ import { parseFeedbackSection, serializeFeedbackSection } from "./feedbackParser
 export type FeedbackTarget =
   | { kind: "feature"; moduleId: string; featureId: string }
   | { kind: "entity"; entityId: string }
-  | { kind: "entity-module"; moduleId: string; entityId: string };
+  | { kind: "entity-module"; moduleId: string; entityId: string }
+  | { kind: "usecase"; moduleId: string; functionId: string; usecaseId: string }
+  | { kind: "screen"; moduleId: string; screenId: string };
 
 /**
- * "feature:<m>:<f>" / "entity:<e>" / "entity:<m>:<e>" → 结构化 target。
- * 任何不符合格式的 target 串返回 null,由 route 转 400。
+ * "feature:<m>:<f>" / "entity:<e>" / "entity:<m>:<e>" / "usecase:<m>:<fn>:<u>" / "screen:<m>:<s>"
+ * → 结构化 target。 不符合格式的 target 串返回 null, 由 route 转 400。
  */
 export function parseTargetString(s: string): FeedbackTarget | null {
   const parts = s.split(":");
@@ -42,6 +44,14 @@ export function parseTargetString(s: string): FeedbackTarget | null {
   if (parts[0] === "entity" && parts.length === 3) {
     if (!ID_RE.test(parts[1]) || !ID_RE.test(parts[2])) return null;
     return { kind: "entity-module", moduleId: parts[1], entityId: parts[2] };
+  }
+  if (parts[0] === "usecase" && parts.length === 4) {
+    if (!ID_RE.test(parts[1]) || !ID_RE.test(parts[2]) || !ID_RE.test(parts[3])) return null;
+    return { kind: "usecase", moduleId: parts[1], functionId: parts[2], usecaseId: parts[3] };
+  }
+  if (parts[0] === "screen" && parts.length === 3) {
+    if (!ID_RE.test(parts[1]) || !ID_RE.test(parts[2])) return null;
+    return { kind: "screen", moduleId: parts[1], screenId: parts[2] };
   }
   return null;
 }
@@ -61,13 +71,35 @@ export function resolveTargetFile(productId: string, target: FeedbackTarget): st
   if (target.kind === "entity") {
     return dataPath("products", productId, "entities", `${target.entityId}.md`);
   }
+  if (target.kind === "entity-module") {
+    return dataPath(
+      "products",
+      productId,
+      "modules",
+      target.moduleId,
+      "entities",
+      `${target.entityId}.md`
+    );
+  }
+  if (target.kind === "usecase") {
+    // 文件名仅 usecaseId(usecase-contract §4 规范, function_id 不在文件名重复)
+    return dataPath(
+      "products",
+      productId,
+      "modules",
+      target.moduleId,
+      "usecases",
+      `${target.usecaseId}.md`
+    );
+  }
+  // screen
   return dataPath(
     "products",
     productId,
     "modules",
     target.moduleId,
-    "entities",
-    `${target.entityId}.md`
+    "screens",
+    `${target.screenId}.md`
   );
 }
 
@@ -101,6 +133,10 @@ export function replaceOrAppendFeedbackSection(
       ? /^##\s+线索池\s*$/m
       : kind === "entity" || kind === "entity-module"
       ? /^##\s+决策\s*$/m
+      : kind === "usecase"
+      ? /^##\s+备注\s*$/m
+      : kind === "screen"
+      ? /^##\s+设计决策\s*$/m
       : null;
 
   const newSegment = (body.endsWith("\n") ? "" : "\n") + "\n" + newSectionText;

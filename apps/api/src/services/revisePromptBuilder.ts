@@ -3,6 +3,8 @@ import type { GlobalFeedbackScope, ProductMeta } from "@atlas/shared";
 import { DATA_ROOT, readTextFile } from "./fileReader";
 import { normalizeProductMeta, parseYaml } from "./markdownParser";
 import { loadEntities, loadModules, loadFeatures } from "./entityLoader";
+import { loadUseCases } from "./usecaseLoader";
+import { loadScreens } from "./screenLoader";
 import { parseGlobalFeedbackFile } from "./globalFeedbackParser";
 
 export interface FeaturePromptStats {
@@ -19,7 +21,22 @@ export interface PrototypePromptStats {
   global_count: number;
 }
 
-export type ReviseStats = FeaturePromptStats | EntityPromptStats | PrototypePromptStats;
+export interface UseCasePromptStats {
+  usecases_with_revision: number;
+  global_count: number;
+}
+
+export interface ScreenPromptStats {
+  screens_with_revision: number;
+  global_count: number;
+}
+
+export type ReviseStats =
+  | FeaturePromptStats
+  | EntityPromptStats
+  | PrototypePromptStats
+  | UseCasePromptStats
+  | ScreenPromptStats;
 
 export interface ReviseResult {
   prompt: string;
@@ -300,6 +317,131 @@ const ACTOR_FOOTER = (productId: string) => `## 注意事项
 - 改 actor.type 要小心: 影响 ActorTab 卡片分组 + MatrixTab 颜色编码
 `;
 
+/**
+ * UseCase Revise — 把 usecase body 信息密度拉满, 为下游 Screen / Entity 推导提供输入。
+ *
+ * 故意不引 DECISION_MAKER_VIEW_GUIDE: usecase body 是技术性叙述(步骤 / 字段 / 状态), 没有 "## 给决策者" 段,
+ * 引入决策者视角规范会让 agent 把字段名也按 "禁 schema 黑话" 重写, 反而破坏 usecase 技术准确性。
+ */
+const USECASE_TASK = `## 你的任务
+你是 Atlas 的 UseCase 修订 Agent。根据下面的反馈, 重写对应的 usecase body, 把信息密度拉满, 让下游 Screen / Entity 推导有足够输入。
+
+${AGENT_SELF_DECISION_PRINCIPLE}
+
+## 工作流
+
+1. **先输出 diff plan** — 改哪些 usecase / 应用哪些反馈 / 是否触发拆分建议 / 自决了哪些工程问题
+2. **等用户确认后**再用 Edit/Write 改 .md
+3. 对每个 usecase, 用 Read 工具阅读以下上下文(prompt 不内联, 节省 token):
+   - \`modules/<m>/usecases/<id>.md\` 当前完整内容
+   - frontmatter.function_id 指向的 \`modules/<m>/features/<fn>.md\`(理解功能上下文)
+   - frontmatter.actor_id 指向的 \`actors/<actor>.md\`
+   - frontmatter.entity_ids 逐一打开 \`derived/entities/<name>.md\` 的 \`## 字段\` markdown 表
+4. 按下方《Body 重写规范》重写 body
+5. 改完后:
+   - 把 \`## 反馈池\` 段重置为空(\`\`\`yaml\\n[]\\n\`\`\`)
+   - 删除 frontmatter 的 \`needs_revision\` 字段(若反馈被清空, feedbackWriter 会自动清, 但 agent 主动清更稳)
+   - 在 body 末尾的 \`## 修订记录\` 段(没有则新建)追加: "{today}: 基于 N 条反馈修订 - 简短说明"
+
+## Body 重写规范(4 段, 缺一不可)
+
+### Section A · 步骤序列
+
+6 列 markdown 表, 目标 8 步, 超过 12 步触发拆分建议(见下方):
+
+\`\`\`
+| 步骤名 | 触发条件 | actor 动作 | 系统响应 | 字段读写 | 状态变化 |
+|---|---|---|---|---|---|
+| 填表 | actor 进入录入页 | 录入姓名/电话/渠道 | 实时校验手机号格式 | Student.name(W), Student.phone(W), Student.channel(W) | (无) |
+| 提交 | 点提交 | — | 校验通过则落库 | Student.* (W) | Student: 待创建 → 已建档 |
+\`\`\`
+
+- **字段读写**: \`{EntityName}.{field}(R|W|D)\` — R 读 / W 写 / D 派生。 字段名**必须**来自 entity 字段表, 不发明
+- **状态变化**: 优先引 entity \`## 状态机\` 段定义的状态名; 若 entity 未定义状态机, 允许自然语言状态描述(如 "档案已入库"), **禁发明** schema 级状态枚举名(如 \`StudentStatus.ACTIVE\`)
+- 步骤扁平不嵌套, 不写实现细节(表名 / API 路由 / ORM / 索引)
+
+### Section B · 异常分支
+
+2~5 个异常。 格式:
+
+- **异常名**: 触发条件 / 系统响应 / 用户感知
+
+### Section C · 次要 actor 可见性
+
+本 usecase 中除主 actor 之外哪些 actor 能看到哪些步骤。 **字段级权限属于 feature 范围**(feature.字段权限矩阵已管), 不下沉到这里。 格式:
+
+- **{actor_name}**: 可见步骤 [...] / 不可见步骤 [...]
+
+若无次要 actor, 写 "(无)"。
+
+### Section D · Revision Log
+
+一行, 简述本次改了什么。
+
+## 拆分建议机制(避免反馈池自循环)
+
+若发现某 usecase 实际违反 \`docs/usecase-contract.md §3\` 拆分规则(步骤超 12 / 跨多个流程目标 / 跨多个主导 entity):
+
+- **不写入反馈池**(避免下次 revise 当成普通反馈再处理, 形成死循环)
+- **改为在 frontmatter 写入或更新 \`split_suggestion: "..."\` 字段**(单行字符串, 说明应拆为哪几个 usecase + 简短理由)
+- body 重写仍完成 Section A(主流程), B/C/D 可标 "待拆分后补"
+- UseCaseModal 会在 UI 上 banner 提示用户做拆分决策
+
+## 强约束
+
+- frontmatter **仅允许写入或更新 \`split_suggestion\` 字段 + 清除 \`needs_revision\` 字段**, 其他 frontmatter 字段一律不动(id / function_id / actor_id / entity_ids / precondition / postcondition / source)
+- 字段名必须来自 entity 字段表
+- 状态名软约束(见 Section A)
+- 不写实现细节
+- 步骤扁平
+`;
+
+const USECASE_FOOTER = (productId: string) => `## 注意事项
+- 不要触碰 data/products/${productId}/ 之外的文件
+- 不要修改 STATUS.md / SUMMARY.md / 补充 .md
+- usecase.md 改完, 运行 atlas 应能正常加载(parser 依赖 frontmatter 的 id / function_id / actor_id 三必填字段)
+- 反向引用永不写入 frontmatter(单源原则)
+- \`## 反馈池\` 段是 parser + feedbackWriter 依赖的, 必须保留 H2 标题(空池写 \`[]\`)
+`;
+
+/**
+ * Screen Revise — 类比 UseCase, batched 模式, 沿 USECASE_TASK 同结构。
+ */
+const SCREEN_TASK = `## 你的任务
+你是 Atlas 的 Screen 修订 Agent (v0.1 双轨设计 · 界面轨)。根据反馈, 重写对应 screen 的 body / entity_visibility, 确保字段引用闭环、状态变体齐全。
+
+${AGENT_SELF_DECISION_PRINCIPLE}
+
+## 工作流
+
+1. **先输出 diff plan** — 改哪些 screen / 应用哪些反馈 / 是否触发 entity_visibility 调整
+2. **等用户确认后**再 Edit/Write
+3. 对每个 screen, 读盘获取上下文:
+   - \`modules/<m>/screens/<id>.md\` 当前完整内容
+   - frontmatter.usecase_ids 中每个 usecase 的 \`modules/<m>/usecases/<u>.md\`
+   - 涉及的每个 entity 的 \`derived/entities/<EntityName>.md\` 字段表
+4. 重写 body 时保留 7 段结构(用途 / 拆分理由 / 信息架构 / 字段可见性补充说明 / 状态变体 / 设计决策 / 反馈池)
+5. 改完后:
+   - 反馈池重置为 \`[]\`
+   - 删除 frontmatter.needs_revision
+   - body 末尾 \`## 修订记录\` 段(没有则新建)追加: "{today}: 基于 N 条反馈修订 - 简短说明"
+
+## 强约束
+
+- 字段名必须来自 entity 字段表; \`derived_fields\` 中的字段必须在表中标 derived
+- \`entity_visibility.<E>.default\` 必须覆盖该 entity 被本 screen 承接的 usecase 中写入(W)的字段
+- 不写 Figma 链接 / CSS / 颜色值
+- frontmatter 仅允许更新 \`entity_visibility / usecase_ids / prototype_url / preview_image\` + 清除 \`needs_revision\`, 不动 \`id / module\`
+- 若反馈涉及"该屏其实应该拆为多屏", 写 \`split_suggestion: "..."\` 字段, 由人决策, 不自行新建多个 screen 文件
+`;
+
+const SCREEN_FOOTER = (productId: string) => `## 注意事项
+- 不要触碰 data/products/${productId}/ 之外的文件
+- screen.md 改完, 运行 atlas 应能通过 validateScreen(\`POST /api/products/${productId}/screens\` 校验)
+- 反向引用永不写入 frontmatter(单源原则)
+- \`## 反馈池\` 段是 parser + feedbackWriter 依赖的, 必须保留 H2 标题(空池写 \`[]\`)
+`;
+
 /** 拼接一个 feature 的反馈块 */
 function featureBlock(
   moduleId: string,
@@ -326,6 +468,39 @@ function entityBlock(
 ): string {
   return [
     `### ${scope}/${entityId}`,
+    `反馈条目(${feedbackLines.length} 条):`,
+    ...feedbackLines,
+    ""
+  ].join("\n");
+}
+
+function usecaseBlock(
+  moduleId: string,
+  functionId: string,
+  usecaseId: string,
+  feedbackLines: string[],
+  splitSuggestion?: string
+): string {
+  const splitLine = splitSuggestion
+    ? [`⚠️ 已有 split_suggestion: ${splitSuggestion}`, ""]
+    : [];
+  return [
+    `### modules/${moduleId}/usecases/${usecaseId}.md (function: ${functionId})`,
+    ...splitLine,
+    `反馈条目(${feedbackLines.length} 条):`,
+    ...feedbackLines,
+    ""
+  ].join("\n");
+}
+
+function screenBlock(
+  moduleId: string,
+  screenId: string,
+  screenName: string,
+  feedbackLines: string[]
+): string {
+  return [
+    `### modules/${moduleId}/screens/${screenId}.md (${screenName})`,
     `反馈条目(${feedbackLines.length} 条):`,
     ...feedbackLines,
     ""
@@ -415,6 +590,81 @@ export async function buildEntityRevisePrompt(productId: string): Promise<Revise
     stats: {
       entities_with_revision: entitiesWithRevision,
       global_count: global.entity.length
+    }
+  };
+}
+
+/**
+ * UseCase Revise prompt — batched 模式, 扫所有 needs_revision=true 或反馈池非空的 usecase 一次出 prompt。
+ * 全局需求池没有 usecase scope (历史上 usecase 工作折叠在 feature scope 里), 这里不引全局段。
+ */
+export async function buildUseCaseRevisePrompt(productId: string): Promise<ReviseResult> {
+  const meta = await loadMeta(productId);
+  const usecases = await loadUseCases(productId);
+  const blocks: string[] = [];
+  let usecasesWithRevision = 0;
+
+  for (const u of usecases) {
+    const fbs = u.feedback ?? [];
+    if (!u.needs_revision && fbs.length === 0) continue;
+    usecasesWithRevision += 1;
+    const fbLines = fbs.length === 0
+      ? ["(frontmatter 标了 needs_revision 但反馈池已空,请确认是否仍需修订)"]
+      : fbs.map((fb) => `- [${fb.id}] (${fb.date}) ${fb.content.replace(/\n/g, " ")}`);
+    blocks.push(usecaseBlock(u.module, u.function_id, u.id, fbLines, u.split_suggestion));
+  }
+
+  const parts: string[] = [
+    header(meta, productId, "用例"),
+    USECASE_TASK,
+    "## 待处理的 usecase 反馈",
+    "",
+    blocks.length === 0 ? "(没有 needs_revision=true 的 usecase)\n" : blocks.join("---\n"),
+    USECASE_FOOTER(productId)
+  ];
+
+  return {
+    prompt: parts.join("\n"),
+    stats: {
+      usecases_with_revision: usecasesWithRevision,
+      global_count: 0
+    }
+  };
+}
+
+/**
+ * Screen Revise prompt — batched, 扫所有 needs_revision=true 或反馈池非空的 screen。
+ */
+export async function buildScreenRevisePrompt(productId: string): Promise<ReviseResult> {
+  const meta = await loadMeta(productId);
+  const screens = await loadScreens(productId);
+  const blocks: string[] = [];
+  let screensWithRevision = 0;
+
+  for (const s of screens) {
+    const fbs = s.feedback ?? [];
+    if (!s.needs_revision && fbs.length === 0) continue;
+    screensWithRevision += 1;
+    const fbLines = fbs.length === 0
+      ? ["(frontmatter 标了 needs_revision 但反馈池已空,请确认是否仍需修订)"]
+      : fbs.map((fb) => `- [${fb.id}] (${fb.date}) ${fb.content.replace(/\n/g, " ")}`);
+    blocks.push(screenBlock(s.module, s.id, s.name, fbLines));
+  }
+
+  const parts: string[] = [
+    header(meta, productId, "界面屏"),
+    SCREEN_TASK,
+    "## 待处理的 screen 反馈",
+    "",
+    blocks.length === 0 ? "(没有 needs_revision=true 的 screen)\n" : blocks.join("---\n"),
+    SCREEN_FOOTER(productId)
+  ];
+
+  return {
+    prompt: parts.join("\n"),
+    stats: {
+      screens_with_revision: screensWithRevision,
+      global_count: 0
     }
   };
 }

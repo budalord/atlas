@@ -4,7 +4,9 @@ import {
   buildActorRevisePrompt,
   buildFeatureRevisePrompt,
   buildEntityRevisePrompt,
-  buildPrototypeRevisePrompt
+  buildPrototypeRevisePrompt,
+  buildScreenRevisePrompt,
+  buildUseCaseRevisePrompt
 } from "../services/revisePromptBuilder";
 import {
   buildFeatureGeneratePrompt,
@@ -12,19 +14,28 @@ import {
   buildEntityDerivePrompt,
   buildConventionsGeneratePrompt,
   buildPrototypeGeneratePrompt,
+  buildScreenGeneratePrompt,
   type GenerateScope
 } from "../services/generatePromptBuilder";
 
 export const promptsRouter = Router({ mergeParams: true });
 
-type ReviseScope = "feature" | "entity" | "prototype" | "actor";
-const REVISE_SCOPES = new Set<ReviseScope>(["feature", "entity", "prototype", "actor"]);
+type ReviseScope = "feature" | "entity" | "prototype" | "actor" | "usecase" | "screen";
+const REVISE_SCOPES = new Set<ReviseScope>([
+  "feature",
+  "entity",
+  "prototype",
+  "actor",
+  "usecase",
+  "screen"
+]);
 const GENERATE_SCOPES = new Set<GenerateScope>([
   "feature",
   "entity",
   "entity-derive",
   "conventions",
-  "prototype"
+  "prototype",
+  "screen"
 ]);
 
 /** GET /api/products/:id/revise-prompt?scope=feature|entity|prototype */
@@ -43,6 +54,8 @@ promptsRouter.get("/revise-prompt", async (req, res, next) => {
     if (scope === "feature") result = await buildFeatureRevisePrompt(productId);
     else if (scope === "entity") result = await buildEntityRevisePrompt(productId);
     else if (scope === "actor") result = await buildActorRevisePrompt(productId);
+    else if (scope === "usecase") result = await buildUseCaseRevisePrompt(productId);
+    else if (scope === "screen") result = await buildScreenRevisePrompt(productId);
     else result = await buildPrototypeRevisePrompt(productId);
     res.json({ data: result, version: getDataVersion() });
   } catch (e) {
@@ -67,6 +80,7 @@ promptsRouter.get("/generate-prompt", async (req, res, next) => {
     else if (scope === "entity") result = await buildEntityGeneratePrompt(productId);
     else if (scope === "entity-derive") result = await buildEntityDerivePrompt(productId);
     else if (scope === "conventions") result = await buildConventionsGeneratePrompt(productId);
+    else if (scope === "screen") result = await buildScreenGeneratePrompt(productId);
     else result = await buildPrototypeGeneratePrompt(productId);
     res.json({ data: result, version: getDataVersion() });
   } catch (e) {

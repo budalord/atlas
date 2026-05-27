@@ -90,5 +90,11 @@ export type {
   CapabilitySource,
   CapabilityWithRefs,
   UseCase,
+  // v0.1 Screen 层(界面轨)
+  Screen,
+  ScreenSummary,
+  ScreenEntityVisibility,
+  ScreenWithRefs,
+  ScreenValidationIssue,
   ReferenceIntegrityIssue
 } from "@atlas/shared";
