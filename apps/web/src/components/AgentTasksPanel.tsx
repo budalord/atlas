@@ -1,28 +1,76 @@
 import { useEffect, useMemo, useState } from "react";
 import { useDataChange } from "../lib/useDataChange";
 import { useUiStore } from "../stores/uiStore";
-import type { ApiEnvelope, RefineTask, TaskStage } from "../types";
+import type { ApiEnvelope, Task, TaskKind, TaskStage } from "../types";
+import { ReviewChangesetModal } from "./ReviewChangesetModal";
 
 interface AgentTasksPanelProps {
   productId: string;
 }
 
+const BATCH_KINDS: ReadonlyArray<Exclude<TaskKind, "feature-refine">> = [
+  "feature-revise",
+  "usecase-revise",
+  "screen-generate",
+  "screen-revise"
+];
+
+const BATCH_LABELS: Record<Exclude<TaskKind, "feature-refine">, string> = {
+  "feature-revise": "Run feature revise",
+  "usecase-revise": "Run usecase revise",
+  "screen-generate": "Run screen generate",
+  "screen-revise": "Run screen revise"
+};
+
 /**
  * 产品内嵌的 agent 任务面板:展示该产品的「当前任务」+「最近完成 5 条」。
- * 仅在「进行中」phase 渲染(由父组件 ProductDetail 控制)。
+ * v0.2b1: 顶部加 4 个 batch kind 触发按钮; batch task 点击进 ReviewChangesetModal,
+ * feature-refine task 点击仍走 FeatureDrawer。
  */
 export function AgentTasksPanel({ productId }: AgentTasksPanelProps) {
-  const [tasks, setTasks] = useState<RefineTask[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [reviewTask, setReviewTask] = useState<Task | null>(null);
+  const [runBusy, setRunBusy] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
   const requestFeatureOpen = useUiStore((s) => s.requestFeatureOpen);
 
   const load = async () => {
     try {
       const res = await fetch("/api/tasks");
       if (!res.ok) return;
-      const json = (await res.json()) as ApiEnvelope<RefineTask[]>;
+      const json = (await res.json()) as ApiEnvelope<Task[]>;
       setTasks(json.data.filter((t) => t.productId === productId));
     } catch {
       /* ignore */
+    }
+  };
+
+  const triggerBatch = async (kind: Exclude<TaskKind, "feature-refine">) => {
+    if (runBusy) return;
+    setRunBusy(true);
+    setRunError(null);
+    try {
+      const res = await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ productId, kind })
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setRunError(body.error ?? `enqueue failed: ${res.status}`);
+        return;
+      }
+      await load();
+    } finally {
+      setRunBusy(false);
+    }
+  };
+
+  const handleTaskClick = (t: Task) => {
+    if (t.kind === "feature-refine") {
+      requestFeatureOpen(t.productId, t.featureId);
+    } else {
+      setReviewTask(t);
     }
   };
 
@@ -33,6 +81,14 @@ export function AgentTasksPanel({ productId }: AgentTasksPanelProps) {
   useDataChange(() => {
     void load();
   });
+
+  // 同步当前打开 modal 的 task 最新状态
+  useEffect(() => {
+    if (!reviewTask) return;
+    const fresh = tasks.find((t) => t.id === reviewTask.id);
+    if (fresh && fresh !== reviewTask) setReviewTask(fresh);
+    if (!fresh) setReviewTask(null);
+  }, [tasks, reviewTask]);
 
   const buckets = useMemo(() => {
     const active = tasks.filter(
@@ -45,15 +101,6 @@ export function AgentTasksPanel({ productId }: AgentTasksPanelProps) {
     return { active, recent };
   }, [tasks]);
 
-  if (buckets.active.length === 0 && buckets.recent.length === 0) {
-    return (
-      <section className="border-b border-slate-200 bg-white px-6 py-4">
-        <h2 className="text-sm font-semibold text-slate-950">🤖 Agent 任务</h2>
-        <p className="mt-1 text-xs text-slate-500">暂无 agent 任务记录。在「功能点」抽屉点「处理 pending 线索」启动。</p>
-      </section>
-    );
-  }
-
   return (
     <section className="space-y-3 border-b border-slate-200 bg-white px-6 py-4">
       <div className="flex items-baseline justify-between">
@@ -64,24 +111,49 @@ export function AgentTasksPanel({ productId }: AgentTasksPanelProps) {
         </span>
       </div>
 
+      <div className="flex flex-wrap gap-1.5">
+        {BATCH_KINDS.map((k) => (
+          <button
+            className="rounded border border-indigo-300 bg-white px-2.5 py-1 text-[11px] font-medium text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-50"
+            disabled={runBusy}
+            key={k}
+            onClick={() => triggerBatch(k)}
+            type="button"
+          >
+            {BATCH_LABELS[k]}
+          </button>
+        ))}
+      </div>
+      {runError ? <p className="text-xs text-rose-600">{runError}</p> : null}
+
+      {buckets.active.length === 0 && buckets.recent.length === 0 ? (
+        <p className="text-xs text-slate-500">
+          暂无 agent 任务记录。点上面按钮触发 batch,或在「功能点」抽屉点「处理 pending 线索」启动单 feature refine。
+        </p>
+      ) : null}
+
       {buckets.active.length > 0 ? (
         <ul className="space-y-2">
           {buckets.active.map((t) => (
             <li key={t.id}>
               <button
                 className="block w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5 text-left transition hover:border-slate-400"
-                onClick={() => requestFeatureOpen(t.productId, t.featureId)}
+                onClick={() => handleTaskClick(t)}
                 title={
                   t.stage === "awaiting_review"
-                    ? "点击打开功能点抽屉,查看 diff 并接受/拒绝/重做"
-                    : "点击打开功能点抽屉,查看实时进度"
+                    ? "点击查看 changeset 并接受/拒绝"
+                    : "点击查看实时进度"
                 }
                 type="button"
               >
                 <div className="mb-2 flex items-baseline justify-between gap-2">
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-slate-900">{t.featureName}</div>
-                    <div className="font-mono text-[11px] text-slate-500">{t.featureId}</div>
+                    <div className="truncate text-sm font-medium text-slate-900">{t.title}</div>
+                    <div className="font-mono text-[11px] text-slate-500">
+                      {t.kind}
+                      {t.kind === "feature-refine" ? ` · ${t.featureId}` : null}
+                      {t.changedFiles ? ` · ${t.changedFiles.length} 文件` : null}
+                    </div>
                   </div>
                   <StageChip stage={t.stage} />
                 </div>
@@ -100,12 +172,14 @@ export function AgentTasksPanel({ productId }: AgentTasksPanelProps) {
               <li key={t.id}>
                 <button
                   className="flex w-full items-center justify-between gap-2 rounded border border-transparent px-3 py-1.5 text-left text-xs transition hover:border-slate-200 hover:bg-slate-50"
-                  onClick={() => requestFeatureOpen(t.productId, t.featureId)}
+                  onClick={() => handleTaskClick(t)}
                   type="button"
                 >
                   <div className="min-w-0 flex-1">
-                    <span className="text-slate-900">{t.featureName}</span>
-                    <span className="ml-2 text-[11px] text-slate-400">{formatDuration(t)}</span>
+                    <span className="text-slate-900">{t.title}</span>
+                    <span className="ml-2 text-[11px] text-slate-400">
+                      {t.kind} · {formatDuration(t)}
+                    </span>
                   </div>
                   <StageChip stage={t.stage} />
                 </button>
@@ -113,6 +187,10 @@ export function AgentTasksPanel({ productId }: AgentTasksPanelProps) {
             ))}
           </ul>
         </div>
+      ) : null}
+
+      {reviewTask ? (
+        <ReviewChangesetModal onClose={() => setReviewTask(null)} task={reviewTask} />
       ) : null}
     </section>
   );
@@ -122,7 +200,7 @@ export function AgentTasksPanel({ productId }: AgentTasksPanelProps) {
  * 横向阶段条:queued → running → awaiting_review → completed/rejected/failed。
  * 当前阶段高亮,已通过的阶段标实色,未到的阶段虚色;awaiting_review 含暗示用户审阅的箭头。
  */
-function StageProgressBar({ task }: { task: RefineTask }) {
+function StageProgressBar({ task }: { task: Task }) {
   const isTerminalCompleted = task.stage === "completed";
   const isTerminalRejected = task.stage === "rejected" || task.stage === "failed";
   const order: TaskStage[] = ["queued", "running", "awaiting_review"];
@@ -188,7 +266,7 @@ function StageChip({ stage }: { stage: TaskStage }) {
   return <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${c.cls}`}>{c.label}</span>;
 }
 
-function formatDuration(t: RefineTask): string {
+function formatDuration(t: Task): string {
   if (!t.startedAt || !t.finishedAt) return "";
   const start = Date.parse(t.startedAt);
   const end = Date.parse(t.finishedAt);
