@@ -3,17 +3,52 @@ import {
   approveTask,
   getQueue,
   getTask,
+  getTaskChangeset,
   rejectTask,
-  retryTask
+  retryTask,
+  enqueueBatch,
+  acceptChangesetFile,
+  rejectChangesetFile
 } from "../services/taskQueue";
+import type { TaskKind } from "@atlas/shared";
 import { getDataVersion } from "../services/watcher";
 
 type TaskReq = Request<{ tid: string }>;
+type ChangesetFileReq = Request<{ tid: string; idx: string }>;
 
 export const tasksRouter = Router();
 
+const BATCH_KINDS: ReadonlyArray<Exclude<TaskKind, "feature-refine">> = [
+  "feature-revise",
+  "usecase-revise",
+  "screen-generate",
+  "screen-revise"
+];
+
 tasksRouter.get("/", (_req, res) => {
   res.json({ data: getQueue(), version: getDataVersion() });
+});
+
+/**
+ * v0.2b1: 通用 enqueue 入口。
+ * - kind=feature-refine 仍走 POST /api/products/:id/features/:fid/refine (兼容旧前端),
+ *   这里只收 batch kinds。
+ */
+tasksRouter.post("/", (req, res) => {
+  const productId = typeof req.body?.productId === "string" ? req.body.productId : "";
+  const kind = req.body?.kind;
+  if (!productId) {
+    res.status(400).json({ error: "productId required" });
+    return;
+  }
+  if (!BATCH_KINDS.includes(kind)) {
+    res.status(400).json({
+      error: `kind must be one of ${BATCH_KINDS.join(", ")} (feature-refine 走 /products/:id/features/:fid/refine)`
+    });
+    return;
+  }
+  const task = enqueueBatch({ productId, kind });
+  res.status(201).json({ data: task, version: getDataVersion() });
 });
 
 tasksRouter.get("/:tid", (req: TaskReq, res) => {
@@ -23,6 +58,15 @@ tasksRouter.get("/:tid", (req: TaskReq, res) => {
     return;
   }
   res.json({ data: t, version: getDataVersion() });
+});
+
+tasksRouter.get("/:tid/changeset", (req: TaskReq, res) => {
+  const changeset = getTaskChangeset(req.params.tid);
+  if (changeset === null) {
+    res.status(404).json({ error: "task not found" });
+    return;
+  }
+  res.json({ data: changeset, version: getDataVersion() });
 });
 
 tasksRouter.post("/:tid/approve", async (req: TaskReq, res, next) => {
@@ -55,6 +99,38 @@ tasksRouter.post("/:tid/retry", async (req: TaskReq, res, next) => {
   try {
     const extra = typeof req.body?.extra === "string" ? req.body.extra : undefined;
     const result = await retryTask(req.params.tid, extra);
+    if ("error" in result) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    res.json({ data: result, version: getDataVersion() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+tasksRouter.post("/:tid/changeset/:idx/accept", (req: ChangesetFileReq, res) => {
+  const idx = Number.parseInt(req.params.idx, 10);
+  if (!Number.isFinite(idx)) {
+    res.status(400).json({ error: "idx must be integer" });
+    return;
+  }
+  const result = acceptChangesetFile(req.params.tid, idx);
+  if ("error" in result) {
+    res.status(400).json({ error: result.error });
+    return;
+  }
+  res.json({ data: result, version: getDataVersion() });
+});
+
+tasksRouter.post("/:tid/changeset/:idx/reject", async (req: ChangesetFileReq, res, next) => {
+  try {
+    const idx = Number.parseInt(req.params.idx, 10);
+    if (!Number.isFinite(idx)) {
+      res.status(400).json({ error: "idx must be integer" });
+      return;
+    }
+    const result = await rejectChangesetFile(req.params.tid, idx);
     if ("error" in result) {
       res.status(400).json({ error: result.error });
       return;
