@@ -784,7 +784,7 @@ export async function buildScreenGeneratePrompt(productId: string): Promise<Gene
   const workdir = path.join(atlasRoot, "data", "products", productId);
 
   const prompt = [
-    header(meta, productId, "界面屏 Screen 生成"),
+    header(meta, productId, "界面屏 Screen"),
     AGENT_SELF_DECISION_PRINCIPLE,
     "",
     `## 你的任务
