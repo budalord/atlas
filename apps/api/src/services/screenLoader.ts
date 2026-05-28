@@ -12,6 +12,7 @@ import {
 import { parseMarkdownWithFrontmatter } from "./markdownParser";
 import { parseFeedbackSection } from "./feedbackParser";
 import { loadUseCases } from "./usecaseLoader";
+import { loadActors } from "./actorLoader";
 import { loadDerivedEntities } from "./derivedEntityLoader";
 import { parseEntityFieldTable } from "./entityFieldTableParser";
 
@@ -269,10 +270,12 @@ export async function validateScreen(
   screen: Screen
 ): Promise<ScreenValidationIssue[]> {
   const issues: ScreenValidationIssue[] = [];
-  const [allUseCases, allEntities] = await Promise.all([
+  const [allUseCases, allEntities, allActors] = await Promise.all([
     loadUseCases(productId),
-    loadDerivedEntities(productId)
+    loadDerivedEntities(productId),
+    loadActors(productId)
   ]);
+  const actorIds = new Set(allActors.map((a) => a.id));
 
   // 1. usecase_ids 存在性
   const ucIndex = new Map(allUseCases.map((u) => [u.id, u] as const));
@@ -329,6 +332,15 @@ export async function validateScreen(
     checkFieldList(issues, screen, entityName, "default", vis.default, fieldTable, false);
     if (vis.role_gated) {
       for (const [role, list] of Object.entries(vis.role_gated)) {
+        if (!actorIds.has(role)) {
+          issues.push({
+            level: "error",
+            screenId: screen.id,
+            module: screen.module,
+            rule: "field-not-in-entity-fields-table",
+            detail: `role_gated 的 key \`${role}\` 不是 actors/ 中存在的 actor id(entity: ${entityName})`
+          });
+        }
         checkFieldList(issues, screen, entityName, `role_gated.${role}`, list, fieldTable, false);
       }
     }

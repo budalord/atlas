@@ -829,13 +829,17 @@ export async function buildScreenGeneratePrompt(productId: string): Promise<Gene
 - 跨 module 共享屏(若有): {screen-id-x} module: shared
 \`\`\`
 
+**渐进产出允许**: 不要求一次出完产品全部 Screen — 可单 usecase → 单 Screen 渐进推进, 后续轮次扩展。 但当前轮 Step 1 必须显式声明 "本轮处理范围:[usecase-x, usecase-y]"。
+
+**Hub 屏例外**: 「销售工作台 / 教务首页 / 我的待办」这类聚合 N 个 usecase 入口的 hub 屏是有效 Screen 形态, entity_visibility 只列入口所需的轻量字段(列表项摘要), 详细操作走对应叶子 Screen。
+
 ## Step 2 · 为每个 Screen 生成 markdown
 
 **先输出 diff plan**, 等用户确认后再 Edit/Write。
 
 ### 文件位置
 \`modules/<module-id>/screens/<screen-id>.md\` — 单 module 屏放对应 module
-\`modules/shared/screens/<screen-id>.md\` — 跨模块共享屏放 shared 目录(若 shared 目录不存在则 mkdir)
+\`modules/shared/screens/<screen-id>.md\` — 跨模块共享屏放 shared 目录(**本期不自动 mkdir shared/**, 见 §强约束)
 
 ### Frontmatter Schema(严格)
 
@@ -881,9 +885,33 @@ added_at: <YYYY-MM-DD>
 ## 强约束
 
 - 所有字段名**必须**来自 entity \`## 字段\` markdown 表(读 \`derived/entities/<EntityName>.md\`), 不发明
-- \`entity_visibility.<E>.default\` 必须覆盖本 screen 所承接的所有 usecase Section A 「字段读写」中标 W (写) 的字段
+- \`entity_visibility.<E>.default\` 覆盖范围 = **本 screen UI 上会渲染的所有字段**(R 读 + W 写都算), 不只是写字段。 列表/摘要场景的字段也算
 - \`derived_fields\` 中的字段必须在 entity 字段表中标 derived
-- 跨 module 共享屏(\`module: shared\`)不可由 agent 自动合并 — 若发现两个 module 的 usecase 共享一屏, **写入 frontmatter \`split_suggestion: "..."\` 字段交人决策, 不自行 mkdir shared/**(本期 shared/ 目录仅在用户明确意图时创建)
+- \`role_gated\` 的 key 必须是产品 \`actors/\` 目录里存在的 actor id(kebab-case), 校验器会查
+- 跨 module 共享屏(\`module: shared\`):若发现两个 module 的 usecase 共享一屏, **写入 frontmatter \`split_suggestion: "..."\` 交人决策**, 本期不自动 mkdir shared/ 目录, 不写 \`module: shared\` 的 Screen 文件
+
+## API 落盘格式
+
+\`POST /api/products/${productId}/screens\` body 示例:
+
+\`\`\`json
+{
+  "id": "refund-application",
+  "name": "退费申请页",
+  "module": "sales",
+  "usecase_ids": ["refund-by-sales"],
+  "entity_visibility": {
+    "RefundApplication": {
+      "default": ["application_id", "status", "reason"],
+      "role_gated": { "finance": ["processed_by_finance"] },
+      "derived_fields": []
+    }
+  },
+  "body": "## 用途\\n...\\n## 拆分理由\\n..."
+}
+\`\`\`
+
+响应 201 + \`{ data, validation_issues: [] }\` 表示通过; 400 + \`issues: [...]\` 列出阻断级错误。
 
 ## 禁止
 
