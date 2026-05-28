@@ -97,7 +97,14 @@ function stringArray(v: unknown): string[] {
 
 /**
  * 计算派生整体 stale 状态。
- * stale = derived/entities/ 任一实体文件 mtime < (任一 features/*.md / SEAMS.md / DECISIONS.md /
+ *
+ * 基准选择 (按优先级):
+ * 1. derived/reconcile-report.md 存在 → 用它的 mtime 作为「上次 reconcile run 时间」
+ *    (reconcile agent 跑完一定写这个文件, 它代表"派生确实过了一遍")
+ * 2. fallback: derived/entities/ 里 mtime **最旧** 的 entity 文件
+ *    (老产品兼容; 偏严语义: 任一 entity 没追上 = stale)
+ *
+ * stale = 基准 mtime < (任一 features/*.md / SEAMS.md / DECISIONS.md /
  * ENTITIES-OWNERSHIP.md 的最新 mtime)。
  *
  * 派生不存在 → stale=false(空状态由 UI 引导);
@@ -120,6 +127,10 @@ export async function computeDerivedEntitiesStale(productId: string): Promise<{
     return { derivedNewestMtime: null, stale: false, stale_reason: null };
   }
 
+  // 基准 mtime: 优先 reconcile-report.md, fallback 最旧 entity
+  const reconcileReportPath = dataPath("products", productId, "derived", "reconcile-report.md");
+  const reconcileReportMtime = await safeMtimeMs(reconcileReportPath);
+
   let derivedOldest: { file: string; mtime: number } | null = null;
   for (const f of entityFiles) {
     const mtime = await safeMtimeMs(path.join(dir, f));
@@ -129,6 +140,13 @@ export async function computeDerivedEntitiesStale(productId: string): Promise<{
   if (!derivedOldest) {
     return { derivedNewestMtime: null, stale: false, stale_reason: null };
   }
+
+  // baseline: reconcile-report 存在且比"最旧 entity"新 = agent 至少跑过一次完整 reconcile;
+  // 否则用最旧 entity (老产品 / 没有 reconcile-report 的)。
+  const baseline: { file: string; mtime: number } =
+    reconcileReportMtime !== null && reconcileReportMtime > derivedOldest.mtime
+      ? { file: "reconcile-report.md (上次 reconcile run)", mtime: reconcileReportMtime }
+      : derivedOldest;
 
   // 收集 source 文件最新 mtime
   const candidates: Array<{ label: string; absPath: string }> = [];
@@ -170,15 +188,15 @@ export async function computeDerivedEntitiesStale(productId: string): Promise<{
   if (!newestSource) {
     return { derivedNewestMtime: derivedOldest.mtime, stale: false, stale_reason: null };
   }
-  if (newestSource.mtime <= derivedOldest.mtime) {
+  if (newestSource.mtime <= baseline.mtime) {
     return { derivedNewestMtime: derivedOldest.mtime, stale: false, stale_reason: null };
   }
   const newestIso = new Date(newestSource.mtime).toISOString();
-  const derivedIso = new Date(derivedOldest.mtime).toISOString();
+  const baselineIso = new Date(baseline.mtime).toISOString();
   return {
     derivedNewestMtime: derivedOldest.mtime,
     stale: true,
-    stale_reason: `${newestSource.label} 修改于 ${newestIso} 晚于派生(${derivedOldest.file} @ ${derivedIso})`
+    stale_reason: `${newestSource.label} 修改于 ${newestIso} 晚于派生基准(${baseline.file} @ ${baselineIso})`
   };
 }
 
