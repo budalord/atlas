@@ -62,11 +62,15 @@ async function pathExists(...segments: string[]): Promise<boolean> {
 }
 
 /**
- * 加载产品下所有实体(顶层 entities/ + modules/<name>/entities/)。
- * 顶层为共享实体(module=null),模块下为该模块实体。
+ * 加载产品下所有实体。
+ * 来源 (按优先级合并, name 去重):
+ * 1. v0.1 顶层 entities/ + modules/<name>/entities/ (老结构, 含完整 fields/relations/decisions)
+ * 2. v0.2 Path C derived/entities/ (Atlas 派生层, 只读出 stub 用于 MatrixTab 等"实体是否存在"的判断;
+ *    fields/relations/decisions 留空, 详细信息由 derivedEntityLoader 单独提供)
  */
 export async function loadEntities(productId: string): Promise<EntitySpec[]> {
   const entities: EntitySpec[] = [];
+  const seenNames = new Set<string>();
 
   // 顶层共享实体
   if (await pathExists("products", productId, "entities")) {
@@ -75,7 +79,9 @@ export async function loadEntities(productId: string): Promise<EntitySpec[]> {
       const source = await readTextFile("products", productId, "entities", file);
       if (!source) continue;
       const id = file.replace(/\.md$/, "");
-      entities.push(parseEntityMarkdown(id, source, null));
+      const e = parseEntityMarkdown(id, source, null);
+      entities.push(e);
+      seenNames.add(e.name);
     }
   }
 
@@ -89,12 +95,46 @@ export async function loadEntities(productId: string): Promise<EntitySpec[]> {
         const source = await readTextFile("products", productId, "modules", mod, "entities", file);
         if (!source) continue;
         const id = file.replace(/\.md$/, "");
-        entities.push(parseEntityMarkdown(id, source, mod));
+        const e = parseEntityMarkdown(id, source, mod);
+        entities.push(e);
+        seenNames.add(e.name);
       }
     }
   }
 
+  // Path C 派生实体 (stub: 只填 name/id, 让 MatrixTab 等下游知道该 entity 已派生)
+  if (await pathExists("products", productId, "derived", "entities")) {
+    const files = await listMarkdownFiles("products", productId, "derived", "entities");
+    for (const file of files) {
+      // 只看 PascalCase 文件名 (entity 表), 跳过 reconcile-report.md / questions.md / _PLAN.md 等
+      if (!/^[A-Z]/.test(file)) continue;
+      const id = file.replace(/\.md$/, "");
+      // 从 frontmatter 抽 name 字段, 拿不到就 fallback 文件名
+      const source = await readTextFile("products", productId, "derived", "entities", file);
+      const name = extractFrontmatterName(source ?? "") ?? id;
+      if (seenNames.has(name)) continue; // v0.1 已覆盖
+      entities.push({
+        id,
+        name,
+        module: null,
+        fields: [],
+        relations: [],
+        decisions: [],
+        markdown: source ?? ""
+      });
+      seenNames.add(name);
+    }
+  }
+
   return entities;
+}
+
+/** 从 markdown frontmatter 抽 `name:` 字段值 (派生 entity stub 用)。 */
+function extractFrontmatterName(source: string): string | null {
+  const m = source.match(/^---\n([\s\S]*?)\n---/);
+  if (!m) return null;
+  const nameMatch = m[1].match(/^name:\s*(.+?)\s*$/m);
+  return nameMatch ? nameMatch[1].trim() : null;
 }
 
 export async function loadEntity(
