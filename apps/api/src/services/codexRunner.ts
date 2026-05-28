@@ -222,6 +222,30 @@ const V02B1_BATCH_PREAMBLE = `# ⚠️ v0.2b1 非交互 batch 模式 (此段优�
 - 跑完之后, Atlas 会在 UI 上让决策者按文件 review 整组 changeset, 单文件 accept/reject。 你不需要做 review 工作, 也不需要在 stdout 总结。
 - 自决原则 (5 级自检) 全部生效: 工程决策自决 + Agent note 留痕, 真业务问题写到对应 questions.md。 但**不要** 把问题输出在 stdout 等回答 — 写文件。
 
+**Self-critique 强制循环 (v0.2c)**:
+你每写完一个 .md 文件, 必须立刻执行:
+
+1. 用 Read 重读自己刚写的文件全文
+2. 按对应 contract 自查 schema (找 \`docs/<scope>-contract.md\` 看硬约束清单):
+   - feature.md → \`docs/feature-source-contract.md\` (字段表 6 列 / frontmatter 必填 id+name+module+created_at / kebab-case id)
+   - entity.md → \`docs/entity-contract.md\` (字段表列数 / frontmatter / 决策段格式)
+   - usecase.md → \`docs/usecase-contract.md\`
+   - screen.md → \`docs/screen-contract.md\` (entity_visibility yaml schema / usecase_ids 数组)
+   - actor.md → \`docs/actor-contract.md\`
+   - capability.md → \`docs/capability-contract.md\`
+3. 列出违规 (列数错 / frontmatter 缺字段 / 命名违反 kebab-case 或 PascalCase / 反馈池未清空 / 修订记录未追加 等)
+4. 用 Edit 修订, 重新执行 1-3 直到无违规
+5. 通过后才算该文件完成, 才能动下一个
+
+**最常踩的坑** (你历史上反复犯):
+- 6 列字段表被写成 4 列 → 解析器把字段位移到错列
+- frontmatter 漏 \`id\` / \`name\` / \`module\` / \`created_at\` → parser 报 schema fail
+- revise 模式忘记把 \`needs_revision: true\` 删除, 或 \`## 反馈池\` 没清空为 \`[]\`, 或 \`## 修订记录\` 没追加
+- generate 模式给新文件错误地写了 \`needs_revision: true\` (新建即基线, 不应有这个标)
+- entity id 用 kebab-case (应 PascalCase) / 字段名用 PascalCase (应 snake_case)
+
+**违规没自修就交付 = 任务事实上失败**, PM 在 UI 上 reject 后会重跑 — 浪费一次完整 batch 时长。 自修是必须的, 不是可选。
+
 ---
 
 `;
