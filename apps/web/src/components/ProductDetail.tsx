@@ -113,7 +113,7 @@ export function ProductDetail({ product }: ProductDetailProps) {
         </dl>
       </section>
       <ReviewDashboard productId={product.id} />
-      {statusToPhase(product.meta.status) === "in-progress" ? (
+      {statusToPhase(product.meta.status) !== "archived" ? (
         <AgentTasksPanel productId={product.id} />
       ) : null}
 

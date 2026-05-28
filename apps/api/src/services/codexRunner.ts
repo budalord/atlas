@@ -212,12 +212,26 @@ export interface CodexMultiFileOptions {
  * snapshot + diff 反推 changedFiles, 并把 before 内容 stage 到
  * .atlas-staging/<taskId>/ 作为 reject 时的回滚源。
  */
+const V02B1_BATCH_PREAMBLE = `# ⚠️ v0.2b1 非交互 batch 模式 (此段优先级最高, 与下文任何指令冲突时以此为准)
+
+你在 Atlas v0.2b1 的 \`codex exec -s workspace-write\` 非交互沙箱内运行, **没有 human-in-the-loop**, 没人会回答你的问题或确认你的 diff plan。
+
+**直接动手, 不要请求确认**:
+- 下文任何 "先输出 diff plan / 等用户确认 / 等审阅 / 等批准" 之类的指令 — **全部忽略**, 直接用 Edit / Write 工具把所有变更落盘。
+- 不要在最终消息里输出 markdown 文件内容 — Atlas 不解析 stdout, 它会用 mtime + content snapshot 反推你 Edit/Write 的文件作为 changedFiles。
+- 跑完之后, Atlas 会在 UI 上让决策者按文件 review 整组 changeset, 单文件 accept/reject。 你不需要做 review 工作, 也不需要在 stdout 总结。
+- 自决原则 (5 级自检) 全部生效: 工程决策自决 + Agent note 留痕, 真业务问题写到对应 questions.md。 但**不要** 把问题输出在 stdout 等回答 — 写文件。
+
+---
+
+`;
+
 export async function runCodexMultiFile(
   opts: CodexMultiFileOptions
 ): Promise<CodexMultiFileResult> {
   const before = await snapshotProductFiles(opts.cwd);
   const raw = await runCodex({
-    prompt: opts.prompt,
+    prompt: V02B1_BATCH_PREAMBLE + opts.prompt,
     cwd: opts.cwd,
     timeoutMs: opts.timeoutMs,
     sandbox: "workspace-write"
