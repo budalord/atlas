@@ -1,53 +1,96 @@
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
-import type { RefineTask, TaskStage } from "@atlas/shared";
+import type {
+  RefineTask,
+  TaskStage,
+  Task,
+  TaskKind,
+  FeatureRefineTask,
+  FeatureReviseTask,
+  UseCaseReviseTask,
+  ScreenGenerateTask,
+  ScreenReviseTask,
+  ChangedFile
+} from "@atlas/shared";
 import { featureFilePath, loadFeature } from "./entityLoader";
 import { parseFeatureMarkdown } from "./featureParser";
-import { runCodex } from "./codexRunner";
+import { runCodex, runCodexMultiFile } from "./codexRunner";
 import { bumpDataVersion } from "./watcher";
-import { AGENT_SELF_DECISION_PRINCIPLE, DECISION_MAKER_VIEW_GUIDE } from "./revisePromptBuilder";
+import {
+  AGENT_SELF_DECISION_PRINCIPLE,
+  DECISION_MAKER_VIEW_GUIDE,
+  buildFeatureRevisePrompt,
+  buildUseCaseRevisePrompt,
+  buildScreenRevisePrompt
+} from "./revisePromptBuilder";
+import { buildScreenGeneratePrompt } from "./generatePromptBuilder";
+import { restoreFromBackups, clearBackups } from "./changesetTracker";
+import { dataPath } from "./fileReader";
 
 /**
  * 单 agent 串行任务队列。每次最多跑 1 个,任务跑完后状态变 awaiting_review,
- * 文件级 .draft 等待用户接受/拒绝/重做。
+ * 等待用户接受/拒绝。
  *
- * 任务在进程内存中持有;Atlas 重启则丢失(也丢失 .draft 文件无人接管的状态)。
- * 项目 A 范围内可接受。
+ * v0.2b1: 5 种 kind 的任务共享同一队列, runOne / approve / reject 按 kind 分支:
+ * - feature-refine: 旧路径, 单文件 .draft 模式
+ * - feature-revise / usecase-revise / screen-revise: 新 batch, codex
+ *   workspace-write 多文件, .atlas-staging/<taskId>/ 持 backup
+ * - screen-generate: 同 batch 路径, 用 buildScreenGeneratePrompt
+ *
+ * 任务在进程内存中持有;Atlas 重启则丢失。 项目 A 范围内可接受。
  */
 
-interface InternalTask extends RefineTask {
-  /** 给 worker 用的 prompt + ctx;不上 API */
-  payload: {
-    productId: string;
-    moduleName: string;
-    featureId: string;
-    productDir: string;
-    extraInstruction?: string;
-  };
+interface FeatureRefinePayload {
+  productId: string;
+  moduleName: string;
+  featureId: string;
+  productDir: string;
+  extraInstruction?: string;
 }
+
+interface BatchPayload {
+  productId: string;
+  productDir: string;
+}
+
+type InternalTask =
+  | (FeatureRefineTask & { payload: FeatureRefinePayload })
+  | (FeatureReviseTask & { payload: BatchPayload })
+  | (UseCaseReviseTask & { payload: BatchPayload })
+  | (ScreenGenerateTask & { payload: BatchPayload })
+  | (ScreenReviseTask & { payload: BatchPayload });
 
 const tasks: InternalTask[] = [];
 let running = false;
 
-/**
- * 把外部可见字段拷贝出来(剥离 payload)。
- */
-function publicView(t: InternalTask): RefineTask {
-  // 仅保留 RefineTask 字段;不暴露 payload
+/** 公共字段集合 (各 kind 共用)。 */
+function baseView(t: InternalTask) {
   return {
     id: t.id,
     productId: t.productId,
-    kind: "feature-refine",
-    title: t.featureName,
-    moduleName: t.payload.moduleName,
-    featureId: t.featureId,
-    featureName: t.featureName,
+    kind: t.kind,
+    title: t.title,
     stage: t.stage,
     enqueuedAt: t.enqueuedAt,
     startedAt: t.startedAt,
     finishedAt: t.finishedAt,
-    error: t.error
+    error: t.error,
+    changedFiles: t.changedFiles
   };
+}
+
+/** 剥 payload 后的公开视图, 按 kind 决定字段集。 */
+function publicView(t: InternalTask): Task {
+  if (t.kind === "feature-refine") {
+    return {
+      ...baseView(t),
+      kind: "feature-refine",
+      moduleName: t.payload.moduleName,
+      featureId: t.featureId,
+      featureName: t.featureName
+    } as FeatureRefineTask;
+  }
+  return { ...baseView(t), kind: t.kind } as Task;
 }
 
 function setStage(t: InternalTask, stage: TaskStage, extra?: Partial<InternalTask>) {
@@ -57,13 +100,20 @@ function setStage(t: InternalTask, stage: TaskStage, extra?: Partial<InternalTas
   bumpDataVersion(`task:${t.id}:${stage}`);
 }
 
-export function getQueue(): RefineTask[] {
+export function getQueue(): Task[] {
   return tasks.map(publicView);
 }
 
-export function getTask(id: string): RefineTask | null {
+export function getTask(id: string): Task | null {
   const t = tasks.find((x) => x.id === id);
   return t ? publicView(t) : null;
+}
+
+/** 单文件级 changeset 详情, 给 GET /:tid/changeset 用。 */
+export function getTaskChangeset(id: string): ChangedFile[] | null {
+  const t = tasks.find((x) => x.id === id);
+  if (!t) return null;
+  return t.changedFiles ?? [];
 }
 
 export interface EnqueueArgs {
@@ -102,7 +152,7 @@ export function enqueueRefine(args: EnqueueArgs): RefineTask {
   bumpDataVersion(`task:enqueue:${id}`);
   // 触发 worker(异步,不阻塞 enqueue 调用)
   void tick();
-  return publicView(t);
+  return publicView(t) as FeatureRefineTask;
 }
 
 async function tick(): Promise<void> {
@@ -121,7 +171,35 @@ async function tick(): Promise<void> {
 
 async function runOne(t: InternalTask): Promise<void> {
   setStage(t, "running", { startedAt: new Date().toISOString() });
+  try {
+    switch (t.kind) {
+      case "feature-refine":
+        await runFeatureRefine(t);
+        return;
+      case "feature-revise":
+        await runBatchRevise(t, buildFeatureRevisePrompt);
+        return;
+      case "usecase-revise":
+        await runBatchRevise(t, buildUseCaseRevisePrompt);
+        return;
+      case "screen-revise":
+        await runBatchRevise(t, buildScreenRevisePrompt);
+        return;
+      case "screen-generate":
+        await runBatchRevise(t, buildScreenGeneratePrompt);
+        return;
+    }
+  } catch (err) {
+    setStage(t, "failed", {
+      finishedAt: new Date().toISOString(),
+      error: err instanceof Error ? err.message : String(err)
+    });
+  }
+}
 
+async function runFeatureRefine(
+  t: FeatureRefineTask & { payload: FeatureRefinePayload }
+): Promise<void> {
   const filePath = featureFilePath(t.payload.productId, t.payload.moduleName, t.payload.featureId);
   let originalSource: string;
   try {
@@ -185,6 +263,61 @@ async function runOne(t: InternalTask): Promise<void> {
   }
 
   setStage(t, "awaiting_review", { finishedAt: new Date().toISOString() });
+}
+
+/**
+ * 复用通用 batch revise/generate 流程:
+ * builder 出 prompt → codex workspace-write 多文件 → changesetTracker 反推
+ * changedFiles → awaiting_review。 batch kinds 共享。
+ */
+type BatchTask =
+  | (FeatureReviseTask & { payload: BatchPayload })
+  | (UseCaseReviseTask & { payload: BatchPayload })
+  | (ScreenGenerateTask & { payload: BatchPayload })
+  | (ScreenReviseTask & { payload: BatchPayload });
+
+type PromptBuilder = (productId: string) => Promise<{ prompt: string }>;
+
+async function runBatchRevise(t: BatchTask, builder: PromptBuilder): Promise<void> {
+  let prompt: string;
+  try {
+    const built = await builder(t.payload.productId);
+    prompt = built.prompt;
+  } catch (err) {
+    setStage(t, "failed", {
+      finishedAt: new Date().toISOString(),
+      error: `build prompt failed: ${err instanceof Error ? err.message : String(err)}`
+    });
+    return;
+  }
+
+  const result = await runCodexMultiFile({
+    prompt,
+    cwd: t.payload.productDir,
+    taskId: t.id,
+    timeoutMs: 30 * 60_000
+  });
+
+  if (!result.ok) {
+    setStage(t, "failed", {
+      finishedAt: new Date().toISOString(),
+      error: result.error || "codex run failed"
+    });
+    return;
+  }
+
+  if (result.changedFiles.length === 0) {
+    setStage(t, "failed", {
+      finishedAt: new Date().toISOString(),
+      error: "codex 跑完无任何文件变更, 可能 agent 判断无需改动或输出格式异常"
+    });
+    return;
+  }
+
+  setStage(t, "awaiting_review", {
+    finishedAt: new Date().toISOString(),
+    changedFiles: result.changedFiles
+  });
 }
 
 function composePrompt(
@@ -281,23 +414,29 @@ export async function readDraft(
   return { original, draft };
 }
 
-export async function approveTask(taskId: string): Promise<RefineTask | { error: string }> {
+export async function approveTask(taskId: string): Promise<Task | { error: string }> {
   const t = tasks.find((x) => x.id === taskId);
   if (!t) return { error: "task not found" };
   if (t.stage !== "awaiting_review") return { error: `task is in stage ${t.stage}` };
 
-  const filePath = featureFilePath(t.payload.productId, t.payload.moduleName, t.payload.featureId);
-  const draftPath = `${filePath}.draft`;
-  try {
-    const original = await fs.readFile(filePath, "utf8");
-    const draft = await fs.readFile(draftPath, "utf8");
-    // 给"新增到 Resolved 段"的线索行标注 [task:taskId],方便 UI 反查这条线索是哪个 Codex 任务处理的。
-    const tagged = annotateNewlyResolvedWithTaskId(original, draft, t.id);
-    await fs.writeFile(filePath, tagged, "utf8");
-    await fs.unlink(draftPath).catch(() => undefined);
-  } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err) };
+  if (t.kind === "feature-refine") {
+    const filePath = featureFilePath(t.payload.productId, t.payload.moduleName, t.payload.featureId);
+    const draftPath = `${filePath}.draft`;
+    try {
+      const original = await fs.readFile(filePath, "utf8");
+      const draft = await fs.readFile(draftPath, "utf8");
+      // 给"新增到 Resolved 段"的线索行标注 [task:taskId],方便 UI 反查这条线索是哪个 Codex 任务处理的。
+      const tagged = annotateNewlyResolvedWithTaskId(original, draft, t.id);
+      await fs.writeFile(filePath, tagged, "utf8");
+      await fs.unlink(draftPath).catch(() => undefined);
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  } else {
+    // batch kinds: 文件已被 agent workspace-write 落盘, approve = 清 backup
+    await clearBackups(t.payload.productDir, t.id).catch(() => undefined);
   }
+
   setStage(t, "completed", { finishedAt: new Date().toISOString() });
   return publicView(t);
 }
@@ -385,13 +524,23 @@ function extractResolvedKeys(md: string): Set<string> {
   return set;
 }
 
-export async function rejectTask(taskId: string): Promise<RefineTask | { error: string }> {
+export async function rejectTask(taskId: string): Promise<Task | { error: string }> {
   const t = tasks.find((x) => x.id === taskId);
   if (!t) return { error: "task not found" };
   if (t.stage !== "awaiting_review") return { error: `task is in stage ${t.stage}` };
 
-  const filePath = featureFilePath(t.payload.productId, t.payload.moduleName, t.payload.featureId);
-  await fs.unlink(`${filePath}.draft`).catch(() => undefined);
+  if (t.kind === "feature-refine") {
+    const filePath = featureFilePath(t.payload.productId, t.payload.moduleName, t.payload.featureId);
+    await fs.unlink(`${filePath}.draft`).catch(() => undefined);
+  } else {
+    // batch kinds: 把 .atlas-staging/<taskId>/ backup 回滚到原位置
+    const files = t.changedFiles ?? [];
+    try {
+      await restoreFromBackups(t.payload.productDir, t.id, files);
+    } catch (err) {
+      return { error: `restore failed: ${err instanceof Error ? err.message : String(err)}` };
+    }
+  }
   setStage(t, "rejected", { finishedAt: new Date().toISOString() });
   return publicView(t);
 }
@@ -399,28 +548,119 @@ export async function rejectTask(taskId: string): Promise<RefineTask | { error: 
 export async function retryTask(
   taskId: string,
   extra?: string
-): Promise<RefineTask | { error: string }> {
+): Promise<Task | { error: string }> {
   const t = tasks.find((x) => x.id === taskId);
   if (!t) return { error: "task not found" };
   if (t.stage !== "awaiting_review" && t.stage !== "failed" && t.stage !== "rejected") {
     return { error: `task is in stage ${t.stage}, cannot retry` };
   }
 
-  const filePath = featureFilePath(t.payload.productId, t.payload.moduleName, t.payload.featureId);
-  await fs.unlink(`${filePath}.draft`).catch(() => undefined);
+  let next: Task;
+  if (t.kind === "feature-refine") {
+    const filePath = featureFilePath(t.payload.productId, t.payload.moduleName, t.payload.featureId);
+    await fs.unlink(`${filePath}.draft`).catch(() => undefined);
+    next = enqueueRefine({
+      productId: t.payload.productId,
+      moduleName: t.payload.moduleName,
+      featureId: t.payload.featureId,
+      featureName: t.featureName,
+      productDir: t.payload.productDir,
+      extraInstruction: [t.payload.extraInstruction, extra].filter(Boolean).join("\n")
+    });
+  } else {
+    // batch kinds: 回滚 backup 再重排同 kind 任务 (extra 暂不支持, batch 没单独 prompt 调整渠道)
+    if (t.stage === "awaiting_review") {
+      const files = t.changedFiles ?? [];
+      await restoreFromBackups(t.payload.productDir, t.id, files).catch(() => undefined);
+    }
+    next = enqueueBatch({ productId: t.payload.productId, kind: t.kind });
+  }
 
-  // 新建一个新任务,把 extra 拼上
-  const next = enqueueRefine({
-    productId: t.payload.productId,
-    moduleName: t.payload.moduleName,
-    featureId: t.payload.featureId,
-    featureName: t.featureName,
-    productDir: t.payload.productDir,
-    extraInstruction: [t.payload.extraInstruction, extra].filter(Boolean).join("\n")
-  });
-  // 原任务标 rejected(已被新任务替代)
   if (t.stage === "awaiting_review") {
     setStage(t, "rejected", { finishedAt: new Date().toISOString() });
   }
   return next;
+}
+
+/** v0.2b1: 排一个 batch 任务 (feature-revise / usecase-revise / screen-generate / screen-revise)。 */
+export interface EnqueueBatchArgs {
+  productId: string;
+  kind: Exclude<TaskKind, "feature-refine">;
+}
+
+export function enqueueBatch(args: EnqueueBatchArgs): Task {
+  const id = randomUUID();
+  const productDir = dataPath("products", args.productId);
+  const title = batchTaskTitle(args.kind);
+  const base = {
+    id,
+    productId: args.productId,
+    kind: args.kind,
+    title,
+    stage: "queued" as TaskStage,
+    enqueuedAt: new Date().toISOString(),
+    startedAt: null,
+    finishedAt: null,
+    error: null,
+    payload: { productId: args.productId, productDir }
+  };
+  // TS: 通过 kind 字面量给出具体 InternalTask 变体
+  const t = base as InternalTask;
+  tasks.push(t);
+  bumpDataVersion(`task:enqueue:${id}`);
+  void tick();
+  return publicView(t);
+}
+
+function batchTaskTitle(kind: Exclude<TaskKind, "feature-refine">): string {
+  switch (kind) {
+    case "feature-revise": return "Revise features (batch)";
+    case "usecase-revise": return "Revise use cases (batch)";
+    case "screen-revise": return "Revise screens (batch)";
+    case "screen-generate": return "Generate screens (batch)";
+  }
+}
+
+/**
+ * 单文件级 reject: 把 changedFiles[idx] 回滚 + 标记 reviewState=rejected。
+ * task 整体仍 awaiting_review, 直到所有文件都被 accept/reject。
+ */
+export async function rejectChangesetFile(
+  taskId: string,
+  fileIdx: number
+): Promise<Task | { error: string }> {
+  const t = tasks.find((x) => x.id === taskId);
+  if (!t) return { error: "task not found" };
+  if (t.kind === "feature-refine") return { error: "feature-refine kind has no per-file changeset" };
+  if (t.stage !== "awaiting_review") return { error: `task is in stage ${t.stage}` };
+  const files = t.changedFiles ?? [];
+  if (fileIdx < 0 || fileIdx >= files.length) return { error: "file index out of range" };
+  const f = files[fileIdx];
+  if (f.reviewState === "rejected") return publicView(t);
+  try {
+    await restoreFromBackups(t.payload.productDir, t.id, [f]);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+  f.reviewState = "rejected";
+  bumpDataVersion(`task:${t.id}:file-reject:${fileIdx}`);
+  return publicView(t);
+}
+
+/** 单文件级 accept: 仅标 reviewState=accepted (文件已经在 workspace, 不需操作)。 */
+export function acceptChangesetFile(
+  taskId: string,
+  fileIdx: number
+): Task | { error: string } {
+  const t = tasks.find((x) => x.id === taskId);
+  if (!t) return { error: "task not found" };
+  if (t.kind === "feature-refine") return { error: "feature-refine kind has no per-file changeset" };
+  if (t.stage !== "awaiting_review") return { error: `task is in stage ${t.stage}` };
+  const files = t.changedFiles ?? [];
+  if (fileIdx < 0 || fileIdx >= files.length) return { error: "file index out of range" };
+  const f = files[fileIdx];
+  if (f.reviewState === "rejected") return { error: "already rejected, cannot accept" };
+  f.reviewState = "accepted";
+  bumpDataVersion(`task:${t.id}:file-accept:${fileIdx}`);
+  return publicView(t);
 }
