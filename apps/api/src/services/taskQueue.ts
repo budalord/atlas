@@ -37,6 +37,9 @@ function publicView(t: InternalTask): RefineTask {
   return {
     id: t.id,
     productId: t.productId,
+    kind: "feature-refine",
+    title: t.featureName,
+    moduleName: t.payload.moduleName,
     featureId: t.featureId,
     featureName: t.featureName,
     stage: t.stage,
@@ -77,6 +80,9 @@ export function enqueueRefine(args: EnqueueArgs): RefineTask {
   const t: InternalTask = {
     id,
     productId: args.productId,
+    kind: "feature-refine",
+    title: args.featureName,
+    moduleName: args.moduleName,
     featureId: args.featureId,
     featureName: args.featureName,
     stage: "queued",

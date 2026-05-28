@@ -732,17 +732,79 @@ export type TaskStage =
   | "rejected"
   | "failed";
 
-export interface RefineTask {
+/**
+ * 任务类型(v0.2b1)。
+ * - feature-refine: 旧路径, 单 feature 单文件 .draft 模式 (FeatureDrawer 流程)
+ * - feature-revise / usecase-revise / screen-revise: 新 batch 路径, codex workspace-write 多文件
+ * - screen-generate: 新 batch 路径, 用 buildScreenGeneratePrompt
+ */
+export type TaskKind =
+  | "feature-refine"
+  | "feature-revise"
+  | "usecase-revise"
+  | "screen-generate"
+  | "screen-revise";
+
+/** batch kinds 跑完后, 由 changesetTracker 反推的单条文件变更。 */
+export interface ChangedFile {
+  /** 相对 productDir 的路径 (POSIX 分隔符) */
+  path: string;
+  action: "create" | "update" | "delete";
+  /** before 内容; create 时为 null */
+  before: string | null;
+  /** after 内容; delete 时为 null */
+  after: string | null;
+  /** 单文件级 review 状态; 未指定 = 跟随 task 整体 */
+  reviewState?: "pending" | "accepted" | "rejected";
+}
+
+export interface BaseTask {
   id: string;
   productId: string;
-  featureId: string;
-  featureName: string;
+  kind: TaskKind;
+  /** UI 显示名, e.g. "Revise 22 features" 或 feature name */
+  title: string;
   stage: TaskStage;
   enqueuedAt: string;
   startedAt: string | null;
   finishedAt: string | null;
   error: string | null;
+  /** batch kinds 用; feature-refine 走 .draft 不用 */
+  changedFiles?: ChangedFile[];
 }
+
+export interface FeatureRefineTask extends BaseTask {
+  kind: "feature-refine";
+  featureId: string;
+  featureName: string;
+  moduleName: string;
+}
+
+export interface FeatureReviseTask extends BaseTask {
+  kind: "feature-revise";
+}
+
+export interface UseCaseReviseTask extends BaseTask {
+  kind: "usecase-revise";
+}
+
+export interface ScreenGenerateTask extends BaseTask {
+  kind: "screen-generate";
+}
+
+export interface ScreenReviseTask extends BaseTask {
+  kind: "screen-revise";
+}
+
+export type Task =
+  | FeatureRefineTask
+  | FeatureReviseTask
+  | UseCaseReviseTask
+  | ScreenGenerateTask
+  | ScreenReviseTask;
+
+/** 兼容别名: 旧代码用 RefineTask = FeatureRefineTask */
+export type RefineTask = FeatureRefineTask;
 
 /**
  * 产品规格层(Layer 2)文件类别。
