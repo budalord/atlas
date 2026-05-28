@@ -368,9 +368,9 @@ ${AGENT_SELF_DECISION_PRINCIPLE}
 
 ### Section C · 次要 actor 可见性
 
-本 usecase 中除主 actor 之外哪些 actor 能看到哪些步骤。 **字段级权限属于 feature 范围**(feature.字段权限矩阵已管), 不下沉到这里。 格式:
+本 usecase 中除主 actor 之外哪些 actor **在 UI 上能看到主流程的哪些步骤**(UI 可见层级, 不下沉到字段)。 **字段级权限属于 feature 范围**(feature.字段权限矩阵已管), 不在此处展开。 格式:
 
-- **{actor_name}**: 可见步骤 [...] / 不可见步骤 [...]
+- **{actor_name}**: 可见步骤 [步骤名 1, 步骤名 2, ...] / 不可见步骤 [...]
 
 若无次要 actor, 写 "(无)"。
 
@@ -387,11 +387,16 @@ ${AGENT_SELF_DECISION_PRINCIPLE}
 - body 重写仍完成 Section A(主流程), B/C/D 可标 "待拆分后补"
 - UseCaseModal 会在 UI 上 banner 提示用户做拆分决策
 
+**状态机分支处理**:主流程的状态机分支(撤回 withdrawn / 取消 cancelled / 驳回 rejected 等)**默认作为异常分支(Section B)**, 除非该分支自身的主流程步骤 ≥ 5 步才考虑拆为独立 usecase。
+
 ## 强约束
 
 - frontmatter **仅允许写入或更新 \`split_suggestion\` 字段 + 清除 \`needs_revision\` 字段**, 其他 frontmatter 字段一律不动(id / function_id / actor_id / entity_ids / precondition / postcondition / source)
+- **entity_ids 处理**: 若 entity_ids 中某 entity 在 Section A 完全无字段读写, 保留 entity_ids 不动(frontmatter 不改), 在 Revision Log 中追加一句 "X entity 本次 revise 后无字段使用, 是否窄化 entity_ids 由用户审阅时决定"
 - 字段名必须来自 entity 字段表
 - 状态名软约束(见 Section A)
+- **Agent note 用法**: 工程决策 / 默认值选择 / 业务自决留痕 → 用 \`<!-- Agent note: 理由 + "业务方否决可改" -->\` 行内 HTML 注释, 可放表格任一 cell 内 / 异常分支末尾 / 任何需要留痕的位置
+- **revise 期间不许把同一类反馈再丢回反馈池**(自循环死锁): 反馈中的业务模糊点优先按 AGENT_SELF_DECISION_PRINCIPLE 5 级自检自决 + Agent note 留痕; 真自决不动再写 \`split_suggestion\` 让人决策。 **反馈池 revise 完后只能为空 \`[]\`, 不许往里追加新反馈**
 - 不写实现细节
 - 步骤扁平
 `;
@@ -432,6 +437,8 @@ ${AGENT_SELF_DECISION_PRINCIPLE}
 - \`entity_visibility.<E>.default\` 必须覆盖该 entity 被本 screen 承接的 usecase 中写入(W)的字段
 - 不写 Figma 链接 / CSS / 颜色值
 - frontmatter 仅允许更新 \`entity_visibility / usecase_ids / prototype_url / preview_image\` + 清除 \`needs_revision\`, 不动 \`id / module\`
+- **Agent note 用法**: 工程决策 / 默认值选择 / 业务自决留痕 → 用 \`<!-- Agent note: 理由 + "业务方否决可改" -->\` 行内 HTML 注释, 可放任何 body 段落内
+- **revise 期间不许把同一类反馈再丢回反馈池**(自循环死锁): 反馈中的模糊点优先按 AGENT_SELF_DECISION_PRINCIPLE 5 级自检自决 + Agent note 留痕; 真自决不动再写 \`split_suggestion\` 让人决策
 - 若反馈涉及"该屏其实应该拆为多屏", 写 \`split_suggestion: "..."\` 字段, 由人决策, 不自行新建多个 screen 文件
 `;
 
