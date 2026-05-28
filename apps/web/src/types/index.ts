@@ -34,6 +34,7 @@ export type {
   TaskStage,
   TaskKind,
   Task,
+  TaskStep,
   BaseTask,
   FeatureRefineTask,
   FeatureReviseTask,
@@ -41,6 +42,7 @@ export type {
   ScreenGenerateTask,
   ScreenReviseTask,
   ChangedFile,
+  ChangeFileSummary,
   DesignDoc,
   DesignSummary,
   // 批次 1' · 反馈池(精简后只剩 id/date/content)

@@ -7,6 +7,7 @@ import { useDataChange } from "../lib/useDataChange";
 import type { ApiEnvelope, ModuleWithFeatures, Product, ProductVision } from "../types";
 import { AdditionalDocsPanel } from "./AdditionalDocsPanel";
 import { AgentTasksPanel } from "./AgentTasksPanel";
+import { RecentActivityStrip } from "./RecentActivityStrip";
 import { CommitList } from "./CommitList";
 import { CopyPromptButton } from "./CopyPromptButton";
 import { FeatureTable } from "./FeatureTable";
@@ -114,7 +115,10 @@ export function ProductDetail({ product }: ProductDetailProps) {
       </section>
       <ReviewDashboard productId={product.id} />
       {statusToPhase(product.meta.status) !== "archived" ? (
-        <AgentTasksPanel productId={product.id} />
+        <>
+          <RecentActivityStrip productId={product.id} />
+          <AgentTasksPanel productId={product.id} />
+        </>
       ) : null}
 
       <nav className="flex flex-wrap items-center gap-1 border-b border-slate-200 bg-white px-6">

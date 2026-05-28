@@ -152,12 +152,18 @@ export function AgentTasksPanel({ productId }: AgentTasksPanelProps) {
                     <div className="font-mono text-[11px] text-slate-500">
                       {t.kind}
                       {t.kind === "feature-refine" ? ` · ${t.featureId}` : null}
-                      {t.changedFiles ? ` · ${t.changedFiles.length} 文件` : null}
+                      {t.summaryLine ? ` · ${t.summaryLine}` : t.changedFiles ? ` · ${t.changedFiles.length} 文件` : null}
                     </div>
                   </div>
                   <StageChip stage={t.stage} />
                 </div>
                 <StageProgressBar task={t} />
+                {t.stage === "running" && t.steps && t.steps.length > 0 ? (
+                  <div className="mt-1.5 truncate text-[11px] text-slate-500">
+                    <span className="text-amber-600">●</span>{" "}
+                    <span className="font-mono">{t.steps[t.steps.length - 1].label}</span>
+                  </div>
+                ) : null}
               </button>
             </li>
           ))}
@@ -179,6 +185,7 @@ export function AgentTasksPanel({ productId }: AgentTasksPanelProps) {
                     <span className="text-slate-900">{t.title}</span>
                     <span className="ml-2 text-[11px] text-slate-400">
                       {t.kind} · {formatDuration(t)}
+                      {t.summaryLine ? ` · ${t.summaryLine}` : ""}
                     </span>
                   </div>
                   <StageChip stage={t.stage} />

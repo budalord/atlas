@@ -783,6 +783,18 @@ export interface BaseTask {
   error: string | null;
   /** batch kinds 用; feature-refine 走 .draft 不用 */
   changedFiles?: ChangedFile[];
+  /** v0.2c §5.6a: running 中实时 step (codex JSONL 事件抽出) */
+  steps?: TaskStep[];
+  /** v0.2c §5.6b: 完成时聚合 changedFiles.summary 算的 task 级一句话摘要 */
+  summaryLine?: string;
+}
+
+/** v0.2c §5.6a: agent 跑过程中的业务级 step. */
+export interface TaskStep {
+  /** ISO 时间戳 */
+  ts: string;
+  /** 自然语言文字, e.g. "正在校验 student-intake" / "提议写入 Order.md" */
+  label: string;
 }
 
 export interface FeatureRefineTask extends BaseTask {

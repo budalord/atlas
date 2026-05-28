@@ -29,6 +29,21 @@ tasksRouter.get("/", (_req, res) => {
   res.json({ data: getQueue(), version: getDataVersion() });
 });
 
+// v0.2c §5.6c: 跨任务累积视角 — task history (落盘 ~/.atlas/products/<id>/)
+tasksRouter.get("/history/:productId", async (req: Request<{ productId: string }>, res, next) => {
+  try {
+    const days = Math.max(1, Math.min(90, Number.parseInt(String(req.query.days ?? "7"), 10) || 7));
+    const { queryTaskHistory, summarizeHistory } = await import("../services/taskHistory");
+    const [records, summary] = await Promise.all([
+      queryTaskHistory(req.params.productId, days),
+      summarizeHistory(req.params.productId, days)
+    ]);
+    res.json({ data: { records, summary, days }, version: getDataVersion() });
+  } catch (e) {
+    next(e);
+  }
+});
+
 /**
  * v0.2b1: 通用 enqueue 入口。
  * - kind=feature-refine 仍走 POST /api/products/:id/features/:fid/refine (兼容旧前端),

@@ -36,6 +36,11 @@ export interface CodexRunOptions {
    * "workspace-write" 让 agent 直接 Edit/Write cwd 内的文件 (v0.2b1 batch kinds 用)。
    */
   sandbox?: "read-only" | "workspace-write";
+  /**
+   * v0.2c §5.6a: 边 stdout 边解析 JSONL 事件流, 每条业务级 step 调一次。
+   * 解析逻辑 in extractStepFromCodexEvent.
+   */
+  onStep?: (label: string) => void;
 }
 
 /**
@@ -51,11 +56,42 @@ export interface CodexRunOptions {
  *   - 默认 5 分钟超时,超时 SIGKILL 子进程
  *   - PATH 中无 `codex` 时返回 ok=false, error="codex CLI not found in PATH"
  */
+/** v0.2c §5.6a: 从 codex JSONL 事件抽业务级 step 文字, 返 null 表示不渲染. */
+export function extractStepFromCodexEvent(event: unknown): string | null {
+  if (!event || typeof event !== "object") return null;
+  const e = event as Record<string, unknown>;
+  if (e.type !== "item.started") return null;
+  const item = e.item as Record<string, unknown> | undefined;
+  if (!item) return null;
+  if (item.type !== "command_execution") return null;
+  const cmd = String(item.command ?? "").trim();
+  if (!cmd) return null;
+  // 抽 curl /api/agent/<op>/<scope>
+  const m = cmd.match(/curl\s+[^\s]*\s*(?:-[A-Za-z]+\s+\S+\s+)*[-X]*\s*(?:POST|GET)?\s*['"]?(?:https?:\/\/[^/]+)?\/api\/agent\/(\w+)(?:\/(\w+))?/i);
+  if (m) {
+    const op = m[1];
+    const scope = m[2] ?? "";
+    if (op === "validate") return `校验 ${scope}`;
+    if (op === "propose") return `提议写入 ${scope}`;
+    if (op === "feedback") return "查询反馈池";
+    if (["feature", "entity", "usecase", "screen", "actor"].includes(op)) return `读取 ${op}`;
+  }
+  // 文件操作 (apply_patch / sed / cat 等)
+  if (cmd.includes("apply_patch")) return "落盘文件";
+  if (cmd.match(/^(cat|head|tail)\s/)) return "读文件";
+  if (cmd.match(/^(rm|mv|cp)\s/)) return "文件操作";
+  if (cmd.match(/^(ls|find|grep|rg)\s/)) return "扫描文件";
+  // 默认截 cmd 前 50 字
+  const short = cmd.length > 50 ? cmd.slice(0, 50) + "..." : cmd;
+  return `执行 ${short}`;
+}
+
 export async function runCodex({
   prompt,
   cwd,
   timeoutMs = 5 * 60_000,
-  sandbox = "read-only"
+  sandbox = "read-only",
+  onStep
 }: CodexRunOptions): Promise<CodexResult> {
   const outFile = path.join(tmpdir(), `atlas-codex-${randomUUID()}.out`);
 
@@ -112,8 +148,25 @@ export async function runCodex({
       }
     }, timeoutMs);
 
+    let stdoutBuffer = ""; // 用于 line-split JSONL
     child.stdout?.on("data", (buf: Buffer) => {
-      stdout += buf.toString("utf8");
+      const chunk = buf.toString("utf8");
+      stdout += chunk;
+      if (!onStep) return;
+      stdoutBuffer += chunk;
+      let idx: number;
+      while ((idx = stdoutBuffer.indexOf("\n")) >= 0) {
+        const line = stdoutBuffer.slice(0, idx).trim();
+        stdoutBuffer = stdoutBuffer.slice(idx + 1);
+        if (!line) continue;
+        try {
+          const evt = JSON.parse(line);
+          const step = extractStepFromCodexEvent(evt);
+          if (step) onStep(step);
+        } catch {
+          // 非 JSON 行 (如 stderr 混进来的或 "Reading prompt from stdin..."), 忽略
+        }
+      }
     });
     child.stderr?.on("data", (buf: Buffer) => {
       stderr += buf.toString("utf8");
@@ -210,6 +263,8 @@ export interface CodexMultiFileOptions {
   /** 用于 .atlas-staging/<taskId>/ backup 隔离 */
   taskId: string;
   timeoutMs?: number;
+  /** v0.2c §5.6a: 透传给 runCodex 的实时 step 回调 */
+  onStep?: (label: string) => void;
 }
 
 /**
@@ -282,7 +337,8 @@ export async function runCodexMultiFile(
     prompt: V02B1_BATCH_PREAMBLE + opts.prompt,
     cwd: opts.cwd,
     timeoutMs: opts.timeoutMs,
-    sandbox: "workspace-write"
+    sandbox: "workspace-write",
+    onStep: opts.onStep
   });
   if (!raw.ok) {
     return { ok: false, error: raw.error, changedFiles: [], raw };

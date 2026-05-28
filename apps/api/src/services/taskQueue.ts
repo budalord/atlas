@@ -26,6 +26,7 @@ import {
 import { buildScreenGeneratePrompt } from "./generatePromptBuilder";
 import { restoreFromBackups, clearBackups } from "./changesetTracker";
 import { dataPath } from "./fileReader";
+import { appendTaskHistory, buildHistoryRecord } from "./taskHistory";
 
 /**
  * 单 agent 串行任务队列。每次最多跑 1 个,任务跑完后状态变 awaiting_review,
@@ -75,7 +76,9 @@ function baseView(t: InternalTask) {
     startedAt: t.startedAt,
     finishedAt: t.finishedAt,
     error: t.error,
-    changedFiles: t.changedFiles
+    changedFiles: t.changedFiles,
+    steps: t.steps,
+    summaryLine: t.summaryLine
   };
 }
 
@@ -98,6 +101,13 @@ function setStage(t: InternalTask, stage: TaskStage, extra?: Partial<InternalTas
   if (extra) Object.assign(t, extra);
   // 队列状态变化让前端 SSE 拉一次
   bumpDataVersion(`task:${t.id}:${stage}`);
+  // v0.2c §5.6c: 终态时落盘 task-history (best-effort, 失败不影响 task 状态)
+  if (stage === "completed" || stage === "rejected" || stage === "failed") {
+    const view = publicView(t);
+    void appendTaskHistory(buildHistoryRecord(view, stage)).catch((e) => {
+      console.warn(`task-history append failed for ${t.id}:`, e);
+    });
+  }
 }
 
 export function getQueue(): Task[] {
@@ -295,7 +305,16 @@ async function runBatchRevise(t: BatchTask, builder: PromptBuilder): Promise<voi
     prompt,
     cwd: t.payload.productDir,
     taskId: t.id,
-    timeoutMs: 30 * 60_000
+    timeoutMs: 30 * 60_000,
+    // v0.2c §5.6a: 边收事件边写 step
+    onStep: (label: string) => {
+      const ts = new Date().toISOString();
+      if (!t.steps) t.steps = [];
+      t.steps.push({ ts, label });
+      // 控制总条数, 防长 batch 占爆内存 — 仅留最近 30 条
+      if (t.steps.length > 30) t.steps.splice(0, t.steps.length - 30);
+      bumpDataVersion(`task:${t.id}:step`);
+    }
   });
 
   if (!result.ok) {
@@ -314,10 +333,44 @@ async function runBatchRevise(t: BatchTask, builder: PromptBuilder): Promise<voi
     return;
   }
 
+  // v0.2c §5.6b: 聚合 changedFiles.summary 算 task 级一句话
+  const summaryLine = summarizeBatchTask(result.changedFiles);
+
   setStage(t, "awaiting_review", {
     finishedAt: new Date().toISOString(),
-    changedFiles: result.changedFiles
+    changedFiles: result.changedFiles,
+    summaryLine
   });
+}
+
+/** 把 changedFiles[] 聚合成一句话, e.g. "新增 8 screen (academic 4 / channel 2) · 更新 9 usecase". */
+function summarizeBatchTask(files: ChangedFile[]): string {
+  if (files.length === 0) return "无变更";
+  const byScope: Record<string, { create: number; update: number; delete: number; modules: Record<string, number> }> = {};
+  for (const f of files) {
+    const scope = f.path.match(/\/(features|entities|usecases|screens|actors)\//)?.[1]
+      ?? (f.path.startsWith("entities/") ? "entities"
+          : f.path.startsWith("derived/entities/") ? "entities (派生)"
+          : "other");
+    if (!byScope[scope]) byScope[scope] = { create: 0, update: 0, delete: 0, modules: {} };
+    byScope[scope][f.action] += 1;
+    const modMatch = f.path.match(/^modules\/([^/]+)\//);
+    if (modMatch) {
+      const m = modMatch[1];
+      byScope[scope].modules[m] = (byScope[scope].modules[m] ?? 0) + 1;
+    }
+  }
+  const parts: string[] = [];
+  for (const [scope, c] of Object.entries(byScope)) {
+    const subParts: string[] = [];
+    if (c.create > 0) subParts.push(`新增 ${c.create}`);
+    if (c.update > 0) subParts.push(`更新 ${c.update}`);
+    if (c.delete > 0) subParts.push(`删 ${c.delete}`);
+    const modList = Object.entries(c.modules).map(([m, n]) => `${m} ${n}`).join(" / ");
+    const modSfx = modList ? ` (${modList})` : "";
+    parts.push(`${subParts.join("·")} ${scope}${modSfx}`);
+  }
+  return parts.join(" · ");
 }
 
 function composePrompt(
