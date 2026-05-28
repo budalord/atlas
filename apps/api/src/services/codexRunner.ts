@@ -3,6 +3,12 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import type { ChangedFile } from "@atlas/shared";
+import {
+  snapshotProductFiles,
+  diffSnapshot,
+  stageBackups
+} from "./changesetTracker";
 
 export interface CodexResult {
   ok: boolean;
@@ -25,6 +31,11 @@ export interface CodexRunOptions {
   cwd: string;
   /** 超时毫秒数。 */
   timeoutMs?: number;
+  /**
+   * codex sandbox 模式。默认 "read-only" (旧 feature-refine 路径用);
+   * "workspace-write" 让 agent 直接 Edit/Write cwd 内的文件 (v0.2b1 batch kinds 用)。
+   */
+  sandbox?: "read-only" | "workspace-write";
 }
 
 /**
@@ -43,7 +54,8 @@ export interface CodexRunOptions {
 export async function runCodex({
   prompt,
   cwd,
-  timeoutMs = 5 * 60_000
+  timeoutMs = 5 * 60_000,
+  sandbox = "read-only"
 }: CodexRunOptions): Promise<CodexResult> {
   const outFile = path.join(tmpdir(), `atlas-codex-${randomUUID()}.out`);
 
@@ -53,7 +65,7 @@ export async function runCodex({
     "--ephemeral",
     "--ignore-user-config",
     "-s",
-    "read-only",
+    sandbox,
     "--color",
     "never",
     "--json",
@@ -176,4 +188,44 @@ export async function runCodex({
     child.stdin?.write(prompt);
     child.stdin?.end();
   });
+}
+
+export interface CodexMultiFileResult {
+  ok: boolean;
+  error: string;
+  changedFiles: ChangedFile[];
+  /** 透传 codex 原始结果便于排查 */
+  raw: CodexResult;
+}
+
+export interface CodexMultiFileOptions {
+  prompt: string;
+  /** 产品根目录, 也是 codex --cd 的工作目录 */
+  cwd: string;
+  /** 用于 .atlas-staging/<taskId>/ backup 隔离 */
+  taskId: string;
+  timeoutMs?: number;
+}
+
+/**
+ * v0.2b1: 让 codex 在 workspace-write 沙箱内直接 Edit/Write 多文件, Atlas 用
+ * snapshot + diff 反推 changedFiles, 并把 before 内容 stage 到
+ * .atlas-staging/<taskId>/ 作为 reject 时的回滚源。
+ */
+export async function runCodexMultiFile(
+  opts: CodexMultiFileOptions
+): Promise<CodexMultiFileResult> {
+  const before = await snapshotProductFiles(opts.cwd);
+  const raw = await runCodex({
+    prompt: opts.prompt,
+    cwd: opts.cwd,
+    timeoutMs: opts.timeoutMs,
+    sandbox: "workspace-write"
+  });
+  if (!raw.ok) {
+    return { ok: false, error: raw.error, changedFiles: [], raw };
+  }
+  const changedFiles = await diffSnapshot(before, opts.cwd);
+  await stageBackups(opts.cwd, opts.taskId, changedFiles);
+  return { ok: true, error: "", changedFiles, raw };
 }

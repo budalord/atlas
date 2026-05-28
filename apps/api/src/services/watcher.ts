@@ -29,7 +29,13 @@ export function bumpDataVersion(changedPath = "synthetic") {
 export function startDataWatcher() {
   const watcher = chokidar.watch(DATA_ROOT, {
     ignoreInitial: true,
-    persistent: true
+    persistent: true,
+    ignored: [
+      // v0.2b1: 跳过 codex workspace-write 反推 staging backup
+      /(^|[\\/])\.atlas-staging([\\/]|$)/,
+      // feature-refine 旧路径的单文件 draft, 不该触发外部刷新
+      /\.draft$/
+    ]
   });
 
   watcher.on("all", (_event, changedPath) => {
