@@ -114,6 +114,7 @@ export const AGENT_SELF_DECISION_PRINCIPLE = `### Agent 自决原则(强约束 �
 - "重试几次?" — 默认 3 次
 - "X 实体加不加到归属表?" — agent 元工作, 不抛
 - "推荐人改名后字段类型用 string 还是 ref?" — 工程
+- "字段重命名(dict_match_candidates → dict_match_result), 仅本 feature 内引用 / 容器为 json 子结构, 不影响其他 feature/entity 外部 schema" — 工程, 自决 + Agent note
 
 **✅ 正例**(真业务, 该抛):
 - "销售提交退费申请后, 财务还没审之前, 销售能不能撤回?" — 业务流程
@@ -121,6 +122,7 @@ export const AGENT_SELF_DECISION_PRINCIPLE = `### Agent 自决原则(强约束 �
 - "教师工资记录在 ERP 内还是飞书报销中?" — 数据归属边界
 - "套餐摊价按权益条数还是原价比例?" — 影响提成业务规则
 - "推荐人改名后, 历史关系字段保持原值还是更新?" — 业务规则(历史可追溯 vs 当前一致性)
+- "字段类型变化(string → enum 限定取值 / 必填性变化 / json schema 调整)且**被其他 feature 引用** — 算破坏性变更, 抛"
 
 **抛 question 的格式要求**(若决定抛):
 - 必须写出 \`proposed_resolution\` (你建议的答案 + 理由)
@@ -197,17 +199,49 @@ ${AGENT_SELF_DECISION_PRINCIPLE}
 
 ${DECISION_MAKER_VIEW_GUIDE}
 
-工作流要求:
-1. 先阅读完所有反馈和上下文, 在响应里输出一份 diff plan
-2. **等用户确认后再实际写文件**(用 Edit/Write 工具)
-3. 写完每个 function 文件后:
-   - 把 frontmatter 的 needs_revision 删除(或改为 false)
-   - **必须有 \`capability_id\`** 字段(v0.1 必填), 引用 capabilities/<id>.md 中存在的 capability
-   - 优先用新字段 \`actor_ids\` (v0.1 rename from roles), 旧 \`roles\` 字段可同时保留
-   - **如果反馈影响了功能点的语义边界 / 关键取舍 / 决策者需要拍的事**, 同步更新 \`## 给决策者\` 段, **严格按上方《决策者视角写作规范》** — 三段格式 + 不出现 schema 黑话 + 写完自查金句过一遍。 该段缺失则新建在 \`## 描述\` 之前
-   - **如果你改了 \`## 给决策者\` 内容, 顺便把 frontmatter 的 \`reviewed_at\` / \`reviewed_by\` 字段删掉**(决策者视角变了 = 需要重新审阅)
-   - 把 ## 反馈池 段清空为 \`[]\`
-   - 在 ## 修订记录 段追加一行: "{today}: 基于 N 条反馈修订 - 简短说明"
+## 处理范围(批量)
+
+**本次 prompt 的「待处理 feature 反馈」段列出的所有 feature 都要在本轮处理**, 不要挑挑拣拣只改一个。 每个 feature 独立判断 diff, 但在最终汇报里一并列出。
+
+## 工作流(按运行模式分)
+
+**交互模式**(stdin 接终端 / 有人 confirm):
+1. 先阅读完所有反馈和上下文, 在响应里输出一份汇总 diff plan(所有 feature 列在一起)
+2. **等用户输入 OK 后**才用 Edit/Write 写文件
+3. 写完后再次汇报实际改动
+
+**Auto 模式**(codex exec / atlas taskQueue / 后台 subagent — 没人能 confirm):
+1. 先输出汇总 diff plan(供事后审计)
+2. **立即用 Edit/Write 写文件**, 不等确认
+3. 最终输出一份「完成汇报」, 列每个 feature 改了什么 + 自决的工程项 + 留给人决策的真业务项
+
+判定标准: 若 stdin 不是 TTY / 收到的指令来自非交互 caller(prompt 里有 "auto" / "non-interactive" / "no human in loop" 等字样) → Auto 模式; 否则交互模式。
+
+## 写完每个 function 文件后
+
+- 把 frontmatter 的 needs_revision 删除(或改为 false)
+- **必须有 \`capability_id\`** 字段(v0.1 必填), 引用 capabilities/<id>.md 中存在的 capability
+- 优先用新字段 \`actor_ids\` (v0.1 rename from roles), 旧 \`roles\` 字段可同时保留
+- **如果反馈影响了功能点的语义边界 / 关键取舍 / 决策者需要拍的事**, 同步更新 \`## 给决策者\` 段, **严格按上方《决策者视角写作规范》** — 三段格式 + 不出现 schema 黑话 + 写完自查金句过一遍。 该段缺失则新建在 \`## 描述\` 之前
+- **如果你改了 \`## 给决策者\` 内容, 顺便把 frontmatter 的 \`reviewed_at\` / \`reviewed_by\` 字段删掉**(决策者视角变了 = 需要重新审阅)
+- 把 \`## 反馈池\` 段清空为 \`[]\`(段缺失则新建, 见下方模板)
+- 在 \`## 修订记录\` 段追加一行: "{today}: 基于 N 条反馈修订 - 简短说明"(段缺失则新建, 见下方模板)
+
+### 段缺失时的模板
+
+\`\`\`markdown
+## 反馈池
+
+\`\`\`yaml
+[]
+\`\`\`
+
+## 修订记录
+
+- {YYYY-MM-DD}: 基于 N 条反馈修订 — 简短说明
+\`\`\`
+
+两段都放在 body 末尾, \`## 反馈池\` 在 \`## 修订记录\` 之前。 已有同名段则原地清空 / 追加, 不重建。
 4. **何时拆 UseCase** (按 docs/usecase-contract.md §3 规则 7):
    - **拆**: 同动作不同 actor 发起 / 同动作不同前置条件(不同业务路径) / 同动作但数据流向 / 外部系统不同
    - **不拆**: 仅字段差异 / 仅 UI 入口差异 / 仅状态机一条边差异
@@ -328,20 +362,45 @@ const USECASE_TASK = `## 你的任务
 
 ${AGENT_SELF_DECISION_PRINCIPLE}
 
-## 工作流
+## 处理范围(批量)
 
-1. **先输出 diff plan** — 改哪些 usecase / 应用哪些反馈 / 是否触发拆分建议 / 自决了哪些工程问题
-2. **等用户确认后**再用 Edit/Write 改 .md
-3. 对每个 usecase, 用 Read 工具阅读以下上下文(prompt 不内联, 节省 token):
+**本次 prompt 的「待处理 usecase 反馈」段列出的所有 usecase 都要在本轮处理**, 不要挑挑拣拣只改一个。
+
+## 工作流(按运行模式分)
+
+**交互模式**(有人 confirm): 先输出汇总 diff plan → 等用户 OK → Edit/Write → 汇报实际改动
+**Auto 模式**(codex exec / taskQueue / 后台 subagent): 先输出汇总 diff plan → **立即** Edit/Write → 最终输出完成汇报(每 usecase 改了什么 / 自决工程项 / 留给人的真业务项)
+
+判定: stdin 不是 TTY / caller 含 "auto" / "non-interactive" / "no human in loop" → Auto 模式; 否则交互模式。
+
+## 每个 usecase 的处理步骤
+
+1. 用 Read 工具阅读以下上下文(prompt 不内联, 节省 token):
    - \`modules/<m>/usecases/<id>.md\` 当前完整内容
    - frontmatter.function_id 指向的 \`modules/<m>/features/<fn>.md\`(理解功能上下文)
    - frontmatter.actor_id 指向的 \`actors/<actor>.md\`
    - frontmatter.entity_ids 逐一打开 \`derived/entities/<name>.md\` 的 \`## 字段\` markdown 表
-4. 按下方《Body 重写规范》重写 body
-5. 改完后:
-   - 把 \`## 反馈池\` 段重置为空(\`\`\`yaml\\n[]\\n\`\`\`)
+2. 按下方《Body 重写规范》重写 body
+3. 改完后:
+   - 把 \`## 反馈池\` 段重置为空(段缺失则新建, 见下方模板)
    - 删除 frontmatter 的 \`needs_revision\` 字段(若反馈被清空, feedbackWriter 会自动清, 但 agent 主动清更稳)
-   - 在 body 末尾的 \`## 修订记录\` 段(没有则新建)追加: "{today}: 基于 N 条反馈修订 - 简短说明"
+   - 在 body 末尾的 \`## 修订记录\` 段追加: "{today}: 基于 N 条反馈修订 - 简短说明"(段缺失则新建, 见下方模板)
+
+### 段缺失时的模板
+
+\`\`\`markdown
+## 反馈池
+
+\`\`\`yaml
+[]
+\`\`\`
+
+## 修订记录
+
+- {YYYY-MM-DD}: 基于 N 条反馈修订 — 简短说明
+\`\`\`
+
+放在 body 末尾, \`## 反馈池\` 在 \`## 修订记录\` 之前。 已有同名段则原地清空 / 追加, 不重建。
 
 ## Body 重写规范(4 段, 缺一不可)
 
@@ -417,19 +476,30 @@ const SCREEN_TASK = `## 你的任务
 
 ${AGENT_SELF_DECISION_PRINCIPLE}
 
-## 工作流
+## 处理范围(批量)
 
-1. **先输出 diff plan** — 改哪些 screen / 应用哪些反馈 / 是否触发 entity_visibility 调整
-2. **等用户确认后**再 Edit/Write
-3. 对每个 screen, 读盘获取上下文:
+**本次 prompt 的「待处理 screen 反馈」段列出的所有 screen 都要在本轮处理**, 不要挑挑拣拣只改一个。
+
+## 工作流(按运行模式分)
+
+**交互模式**(有人 confirm): 先输出汇总 diff plan → 等用户 OK → Edit/Write → 汇报实际改动
+**Auto 模式**(codex exec / taskQueue / 后台 subagent): 先输出汇总 diff plan → **立即** Edit/Write → 最终输出完成汇报
+
+判定: stdin 不是 TTY / caller 含 "auto" / "non-interactive" / "no human in loop" → Auto 模式; 否则交互模式。
+
+## 每个 screen 的处理步骤
+
+1. 读盘获取上下文:
    - \`modules/<m>/screens/<id>.md\` 当前完整内容
    - frontmatter.usecase_ids 中每个 usecase 的 \`modules/<m>/usecases/<u>.md\`
    - 涉及的每个 entity 的 \`derived/entities/<EntityName>.md\` 字段表
-4. 重写 body 时保留 7 段结构(用途 / 拆分理由 / 信息架构 / 字段可见性补充说明 / 状态变体 / 设计决策 / 反馈池)
-5. 改完后:
-   - 反馈池重置为 \`[]\`
+2. 重写 body 时保留 7 段结构(用途 / 拆分理由 / 信息架构 / 字段可见性补充说明 / 状态变体 / 设计决策 / 反馈池)
+3. 改完后:
+   - 反馈池重置为 \`[]\`(段缺失则新建)
    - 删除 frontmatter.needs_revision
-   - body 末尾 \`## 修订记录\` 段(没有则新建)追加: "{today}: 基于 N 条反馈修订 - 简短说明"
+   - body 末尾 \`## 修订记录\` 段追加: "{today}: 基于 N 条反馈修订 - 简短说明"(段缺失则新建)
+
+段缺失时的模板与 USECASE_TASK 一致。
 
 ## 强约束
 
