@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { ChangedFile } from "@atlas/shared";
+import { inferScopeFromPath, summarizeChange } from "./diffSummarizer";
 
 /**
  * v0.2b1 changeset 跟踪: codex workspace-write 直接落盘前后, 用 mtime + content
@@ -96,21 +97,32 @@ export async function diffSnapshot(
     }
     const prev = before.get(rel);
     if (!prev) {
-      result.push({ path: rel, action: "create", before: null, after });
+      result.push({ path: rel, action: "create", before: null, after, summary: summarize(rel, null, after) });
     } else if (prev.mtimeMs !== mtimeMs && prev.content !== after) {
-      // mtime 变了且内容真的改了 (避免 touch 误报)
-      result.push({ path: rel, action: "update", before: prev.content, after });
+      result.push({ path: rel, action: "update", before: prev.content, after, summary: summarize(rel, prev.content, after) });
     }
   }
 
   // delete: snapshot 有但现在 walk 没有
   for (const [rel, snap] of before) {
     if (!seen.has(rel)) {
-      result.push({ path: rel, action: "delete", before: snap.content, after: null });
+      result.push({ path: rel, action: "delete", before: snap.content, after: null, summary: summarize(rel, snap.content, null) });
     }
   }
 
   return result;
+}
+
+/** v0.2c §5.5: 给每个 ChangedFile 算业务级摘要 */
+function summarize(relPath: string, before: string | null, after: string | null) {
+  const scope = inferScopeFromPath(relPath);
+  // 从文件名 (PascalCase entity / kebab-case 其他) 取 id 给 parser 当 hint
+  const id = path.basename(relPath, ".md");
+  try {
+    return summarizeChange(scope, before, after, id);
+  } catch {
+    return undefined;
+  }
 }
 
 function stagingPath(productDir: string, taskId: string, relPath: string): string {

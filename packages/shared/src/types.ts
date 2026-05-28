@@ -756,6 +756,18 @@ export interface ChangedFile {
   after: string | null;
   /** 单文件级 review 状态; 未指定 = 跟随 task 整体 */
   reviewState?: "pending" | "accepted" | "rejected";
+  /** v0.2c §5.5: 业务级摘要 (字段/段级别 diff), changesetTracker 算出来填 */
+  summary?: ChangeFileSummary;
+}
+
+/** ChangedFile.summary 字段, 由 diffSummarizer 产出。 */
+export interface ChangeFileSummary {
+  /** 一行业务级文字, 给 ReviewChangesetModal 主显示 */
+  line: string;
+  added: string[];
+  removed: string[];
+  changed: string[];
+  kind: "field-diff" | "ref-diff" | "section-diff" | "text-diff" | "create" | "delete";
 }
 
 export interface BaseTask {

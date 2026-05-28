@@ -206,20 +206,25 @@ function ChangesetFileRow({
   const state = file.reviewState ?? "pending";
   return (
     <li className="rounded-md border border-slate-200">
-      <div className="flex items-center justify-between gap-2 px-3 py-2">
+      <div className="flex items-start justify-between gap-2 px-3 py-2">
         <button
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          className="flex min-w-0 flex-1 flex-col items-start gap-1 text-left"
           onClick={onToggle}
           type="button"
         >
-          <span className="text-xs text-slate-400">{expanded ? "▼" : "▶"}</span>
-          <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${actionCls[file.action]}`}>
-            {file.action}
-          </span>
-          <span className="truncate font-mono text-xs text-slate-700">{file.path}</span>
-          <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${stateCls[state]}`}>
-            {state}
-          </span>
+          <div className="flex w-full min-w-0 items-center gap-2">
+            <span className="text-xs text-slate-400">{expanded ? "▼" : "▶"}</span>
+            <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${actionCls[file.action]}`}>
+              {file.action}
+            </span>
+            <span className="truncate font-mono text-xs text-slate-700">{file.path}</span>
+            <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${stateCls[state]}`}>
+              {state}
+            </span>
+          </div>
+          {file.summary ? (
+            <div className="ml-6 text-[11px] text-slate-600">{file.summary.line}</div>
+          ) : null}
         </button>
         {taskActive && state === "pending" ? (
           <div className="flex shrink-0 gap-1">

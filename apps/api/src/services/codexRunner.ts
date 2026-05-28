@@ -74,6 +74,11 @@ export async function runCodex({
     "--cd",
     cwd
   ];
+  // v0.2c §5.4: workspace-write 模式放行 localhost 网络, 让 agent 能 curl
+  // http://127.0.0.1:3001/api/agent/* 调 Atlas validate/inspect/propose
+  if (sandbox === "workspace-write") {
+    args.splice(args.indexOf("--cd"), 0, "-c", "sandbox_workspace_write.network_access=true");
+  }
 
   return new Promise<CodexResult>((resolve) => {
     let child;
@@ -222,20 +227,39 @@ const V02B1_BATCH_PREAMBLE = `# ⚠️ v0.2b1 非交互 batch 模式 (此段优�
 - 跑完之后, Atlas 会在 UI 上让决策者按文件 review 整组 changeset, 单文件 accept/reject。 你不需要做 review 工作, 也不需要在 stdout 总结。
 - 自决原则 (5 级自检) 全部生效: 工程决策自决 + Agent note 留痕, 真业务问题写到对应 questions.md。 但**不要** 把问题输出在 stdout 等回答 — 写文件。
 
-**Self-critique 强制循环 (v0.2c)**:
-你每写完一个 .md 文件, 必须立刻执行:
+**Atlas HTTP API 强制校验 (v0.2c §5.4) — 优先使用**:
+你每写完一个 .md 文件, **必须**用 Bash 调 Atlas validate endpoint:
 
+\`\`\`bash
+curl -s -X POST http://127.0.0.1:3001/api/agent/validate/<scope> \\
+  -H "Content-Type: application/json" \\
+  -d "{\"content\": $(jq -Rs . < path/to/file.md), \"targetId\": \"<id-from-filename>\"}"
+\`\`\`
+
+- scope ∈ feature / entity / usecase / screen / actor
+- HTTP 200 = 通过; HTTP 422 = 返 errors[], 你按 errors 自修后再调一次
+- 不通过就不算完成, 必须 Edit 修复后重校验直到 200
+- 推荐用 POST /api/agent/propose/<scope> 替代直接 Edit/Write (它一次性带校验)
+
+**Atlas HTTP API 查询 endpoints** (按需用, 替代靠 prompt 拼大段上下文):
+- GET /api/agent/feature/<productId>/<featureId> — 拿 feature 结构化对象
+- GET /api/agent/entity/<productId>/<entityName>
+- GET /api/agent/usecase/<productId>/<usecaseId>
+- GET /api/agent/screen/<productId>/<screenId>
+- GET /api/agent/feedback?productId=<id>&scope=<scope> — 反馈池查询
+
+productId 从 \`pwd\` 取 (cwd 是 data/products/<id>/)。
+
+**Self-critique fallback (HTTP 不可达时)**:
+如果 curl 网络失败, 退到本地自查:
 1. 用 Read 重读自己刚写的文件全文
-2. 按对应 contract 自查 schema (找 \`docs/<scope>-contract.md\` 看硬约束清单):
+2. 按对应 contract 自查 schema (\`docs/<scope>-contract.md\`):
    - feature.md → \`docs/feature-source-contract.md\` (字段表 6 列 / frontmatter 必填 id+name+module+created_at / kebab-case id)
    - entity.md → \`docs/entity-contract.md\` (字段表列数 / frontmatter / 决策段格式)
    - usecase.md → \`docs/usecase-contract.md\`
    - screen.md → \`docs/screen-contract.md\` (entity_visibility yaml schema / usecase_ids 数组)
    - actor.md → \`docs/actor-contract.md\`
-   - capability.md → \`docs/capability-contract.md\`
-3. 列出违规 (列数错 / frontmatter 缺字段 / 命名违反 kebab-case 或 PascalCase / 反馈池未清空 / 修订记录未追加 等)
-4. 用 Edit 修订, 重新执行 1-3 直到无违规
-5. 通过后才算该文件完成, 才能动下一个
+3. 列出违规, Edit 修订, 重新自查直到通过
 
 **最常踩的坑** (你历史上反复犯):
 - 6 列字段表被写成 4 列 → 解析器把字段位移到错列
