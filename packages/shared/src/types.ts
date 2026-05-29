@@ -743,7 +743,10 @@ export type TaskKind =
   | "feature-revise"
   | "usecase-revise"
   | "screen-generate"
-  | "screen-revise";
+  | "screen-revise"
+  | "actor-revise"
+  | "entity-revise"
+  | "entity-derive";
 
 /** batch kinds 跑完后, 由 changesetTracker 反推的单条文件变更。 */
 export interface ChangedFile {
@@ -820,12 +823,27 @@ export interface ScreenReviseTask extends BaseTask {
   kind: "screen-revise";
 }
 
+export interface ActorReviseTask extends BaseTask {
+  kind: "actor-revise";
+}
+
+export interface EntityReviseTask extends BaseTask {
+  kind: "entity-revise";
+}
+
+export interface EntityDeriveTask extends BaseTask {
+  kind: "entity-derive";
+}
+
 export type Task =
   | FeatureRefineTask
   | FeatureReviseTask
   | UseCaseReviseTask
   | ScreenGenerateTask
-  | ScreenReviseTask;
+  | ScreenReviseTask
+  | ActorReviseTask
+  | EntityReviseTask
+  | EntityDeriveTask;
 
 /** 兼容别名: 旧代码用 RefineTask = FeatureRefineTask */
 export type RefineTask = FeatureRefineTask;

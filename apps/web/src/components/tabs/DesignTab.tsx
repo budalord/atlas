@@ -180,8 +180,11 @@ export function DesignTab({ productId, readOnly = false, openName, onOpenDesign 
         <div className="flex items-center gap-2">
           {!readOnly && view === "screens" ? (
             <AgentTaskTriggers
-              kinds={["screen-generate", "screen-revise"]}
               productId={productId}
+              triggers={[
+                { label: "生成屏幕", kinds: ["screen-generate"] },
+                { label: "更新屏幕", kinds: ["screen-revise"] }
+              ]}
             />
           ) : null}
           {view === "designs" ? (

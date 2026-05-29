@@ -22,7 +22,10 @@ const BATCH_KINDS: ReadonlyArray<Exclude<TaskKind, "feature-refine">> = [
   "feature-revise",
   "usecase-revise",
   "screen-generate",
-  "screen-revise"
+  "screen-revise",
+  "actor-revise",
+  "entity-revise",
+  "entity-derive"
 ];
 
 tasksRouter.get("/", (_req, res) => {

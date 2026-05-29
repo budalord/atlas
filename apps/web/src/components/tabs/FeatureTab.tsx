@@ -383,8 +383,8 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
         {!readOnly ? (
           <AgentTaskTriggers
             className="px-5 pt-3"
-            kinds={["feature-revise", "usecase-revise"]}
             productId={productId}
+            triggers={[{ label: "更新功能与用例", kinds: ["feature-revise", "usecase-revise"] }]}
           />
         ) : null}
         <div className="px-5 pt-3 pb-2 text-[11px] text-slate-500">

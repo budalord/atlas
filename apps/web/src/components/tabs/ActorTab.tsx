@@ -10,6 +10,7 @@ import type {
   UseCase
 } from "../../types";
 import { MarkdownRenderer } from "../MarkdownRenderer";
+import { AgentTaskTriggers } from "../AgentTaskTriggers";
 
 interface ActorTabProps {
   productId: string;
@@ -39,7 +40,7 @@ const TYPE_COLORS: Record<ActorType, { border: string; bg: string; text: string 
  *
  * 数据源全前端聚合, 无新 endpoint。
  */
-export function ActorTab({ productId }: ActorTabProps) {
+export function ActorTab({ productId, readOnly = false }: ActorTabProps) {
   const [actors, setActors] = useState<ActorWithRefs[]>([]);
   const [capabilities, setCapabilities] = useState<CapabilityWithRefs[]>([]);
   const [entities, setEntities] = useState<EntitySpec[]>([]);
@@ -143,8 +144,17 @@ export function ActorTab({ productId }: ActorTabProps) {
   }
 
   return (
-    <div className="flex items-start">{/* master-detail: 左 list flow + 右 detail sticky-top */}
-      <aside className="w-[320px] shrink-0 border-r border-slate-200 bg-white">
+    <div className="flex min-h-0 flex-1 flex-col">
+      {!readOnly ? (
+        <div className="flex items-center justify-end border-b border-slate-200 bg-slate-50 px-5 py-1.5">
+          <AgentTaskTriggers
+            productId={productId}
+            triggers={[{ label: "更新角色", kinds: ["actor-revise"] }]}
+          />
+        </div>
+      ) : null}
+      <div className="flex items-start">{/* master-detail: 左 list flow + 右 detail sticky-top */}
+        <aside className="w-[320px] shrink-0 border-r border-slate-200 bg-white">
         {(Object.keys(grouped) as ActorType[]).map((t) => {
           const list = grouped[t];
           if (list.length === 0) return null;
@@ -194,6 +204,7 @@ export function ActorTab({ productId }: ActorTabProps) {
         ) : (
           <div className="p-5 text-sm text-slate-500">选择左侧 actor 查看详情。</div>
         )}
+      </div>
       </div>
     </div>
   );

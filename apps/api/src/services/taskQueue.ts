@@ -10,6 +10,9 @@ import type {
   UseCaseReviseTask,
   ScreenGenerateTask,
   ScreenReviseTask,
+  ActorReviseTask,
+  EntityReviseTask,
+  EntityDeriveTask,
   ChangedFile
 } from "@atlas/shared";
 import { featureFilePath, loadFeature } from "./entityLoader";
@@ -21,9 +24,11 @@ import {
   DECISION_MAKER_VIEW_GUIDE,
   buildFeatureRevisePrompt,
   buildUseCaseRevisePrompt,
-  buildScreenRevisePrompt
+  buildScreenRevisePrompt,
+  buildActorRevisePrompt,
+  buildEntityRevisePrompt
 } from "./revisePromptBuilder";
-import { buildScreenGeneratePrompt } from "./generatePromptBuilder";
+import { buildScreenGeneratePrompt, buildEntityDerivePrompt } from "./generatePromptBuilder";
 import { restoreFromBackups, clearBackups } from "./changesetTracker";
 import { dataPath } from "./fileReader";
 import { appendTaskHistory, buildHistoryRecord } from "./taskHistory";
@@ -59,7 +64,10 @@ type InternalTask =
   | (FeatureReviseTask & { payload: BatchPayload })
   | (UseCaseReviseTask & { payload: BatchPayload })
   | (ScreenGenerateTask & { payload: BatchPayload })
-  | (ScreenReviseTask & { payload: BatchPayload });
+  | (ScreenReviseTask & { payload: BatchPayload })
+  | (ActorReviseTask & { payload: BatchPayload })
+  | (EntityReviseTask & { payload: BatchPayload })
+  | (EntityDeriveTask & { payload: BatchPayload });
 
 const tasks: InternalTask[] = [];
 let running = false;
@@ -198,6 +206,15 @@ async function runOne(t: InternalTask): Promise<void> {
       case "screen-generate":
         await runBatchRevise(t, buildScreenGeneratePrompt);
         return;
+      case "actor-revise":
+        await runBatchRevise(t, buildActorRevisePrompt);
+        return;
+      case "entity-revise":
+        await runBatchRevise(t, buildEntityRevisePrompt);
+        return;
+      case "entity-derive":
+        await runBatchRevise(t, buildEntityDerivePrompt);
+        return;
     }
   } catch (err) {
     setStage(t, "failed", {
@@ -284,7 +301,10 @@ type BatchTask =
   | (FeatureReviseTask & { payload: BatchPayload })
   | (UseCaseReviseTask & { payload: BatchPayload })
   | (ScreenGenerateTask & { payload: BatchPayload })
-  | (ScreenReviseTask & { payload: BatchPayload });
+  | (ScreenReviseTask & { payload: BatchPayload })
+  | (ActorReviseTask & { payload: BatchPayload })
+  | (EntityReviseTask & { payload: BatchPayload })
+  | (EntityDeriveTask & { payload: BatchPayload });
 
 type PromptBuilder = (productId: string) => Promise<{ prompt: string }>;
 
@@ -671,6 +691,9 @@ function batchTaskTitle(kind: Exclude<TaskKind, "feature-refine">): string {
     case "usecase-revise": return "Revise use cases (batch)";
     case "screen-revise": return "Revise screens (batch)";
     case "screen-generate": return "Generate screens (batch)";
+    case "actor-revise": return "Revise actors (batch)";
+    case "entity-revise": return "Revise entities (batch)";
+    case "entity-derive": return "Derive entities (batch)";
   }
 }
 

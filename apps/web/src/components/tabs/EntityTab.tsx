@@ -10,6 +10,7 @@ import { useDataChange } from "../../lib/useDataChange";
 import { GlobalFeedbackPanel } from "../GlobalFeedbackPanel";
 import { MarkdownRenderer } from "../MarkdownRenderer";
 import { PromptModalDialog } from "../PromptModalDialog";
+import { AgentTaskTriggers } from "../AgentTaskTriggers";
 
 interface EntityTabProps {
   productId: string;
@@ -109,6 +110,17 @@ export function EntityTab({ productId, readOnly = false }: EntityTabProps) {
         readOnly={readOnly}
         onOpenPrompt={() => setPromptOpen(true)}
       />
+
+      {!readOnly ? (
+        <AgentTaskTriggers
+          className="px-5 pb-2"
+          productId={productId}
+          triggers={[
+            { label: "派生实体", kinds: ["entity-derive"] },
+            { label: "更新实体", kinds: ["entity-revise"] }
+          ]}
+        />
+      ) : null}
 
       {entitiesData.stale ? (
         <div className="border-b border-amber-200 bg-amber-50 px-5 py-2 text-[12px] text-amber-900">
