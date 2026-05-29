@@ -38,6 +38,28 @@ export function AgentTasksPanel({ productId }: AgentTasksPanelProps) {
     }
   };
 
+  const handleDelete = async (t: Task) => {
+    const needsConfirm = t.stage === "running" || t.stage === "awaiting_review";
+    if (
+      needsConfirm &&
+      !window.confirm(
+        t.stage === "running"
+          ? `取消运行中的任务「${t.title}」?codex 进程会被终止(可能留下半截写盘的文件,可重跑修复)。`
+          : `删除待审任务「${t.title}」?agent 写盘的变更会回滚到原状态。`
+      )
+    ) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/tasks/${t.id}`, { method: "DELETE" });
+      if (!res.ok) return;
+      if (reviewTask?.id === t.id) setReviewTask(null);
+      await load();
+    } catch {
+      /* ignore */
+    }
+  };
+
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -80,9 +102,9 @@ export function AgentTasksPanel({ productId }: AgentTasksPanelProps) {
       {buckets.active.length > 0 ? (
         <ul className="space-y-2">
           {buckets.active.map((t) => (
-            <li key={t.id}>
+            <li key={t.id} className="flex items-stretch gap-1">
               <button
-                className="block w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5 text-left transition hover:border-slate-400"
+                className="block flex-1 rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5 text-left transition hover:border-slate-400"
                 onClick={() => handleTaskClick(t)}
                 title={
                   t.stage === "awaiting_review"
@@ -110,6 +132,20 @@ export function AgentTasksPanel({ productId }: AgentTasksPanelProps) {
                   </div>
                 ) : null}
               </button>
+              <button
+                className="shrink-0 rounded-md border border-slate-200 px-2 text-slate-400 transition hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600"
+                onClick={() => void handleDelete(t)}
+                title={
+                  t.stage === "running"
+                    ? "取消任务(终止 codex)"
+                    : t.stage === "queued"
+                      ? "取消排队任务"
+                      : "删除任务(回滚未审变更)"
+                }
+                type="button"
+              >
+                ✕
+              </button>
             </li>
           ))}
         </ul>
@@ -120,9 +156,9 @@ export function AgentTasksPanel({ productId }: AgentTasksPanelProps) {
           <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">最近完成</div>
           <ul className="space-y-1">
             {buckets.recent.map((t) => (
-              <li key={t.id}>
+              <li key={t.id} className="flex items-center gap-1">
                 <button
-                  className="flex w-full items-center justify-between gap-2 rounded border border-transparent px-3 py-1.5 text-left text-xs transition hover:border-slate-200 hover:bg-slate-50"
+                  className="flex flex-1 items-center justify-between gap-2 rounded border border-transparent px-3 py-1.5 text-left text-xs transition hover:border-slate-200 hover:bg-slate-50"
                   onClick={() => handleTaskClick(t)}
                   type="button"
                 >
@@ -134,6 +170,14 @@ export function AgentTasksPanel({ productId }: AgentTasksPanelProps) {
                     </span>
                   </div>
                   <StageChip stage={t.stage} />
+                </button>
+                <button
+                  className="shrink-0 rounded px-1.5 py-1 text-slate-300 transition hover:text-rose-600"
+                  onClick={() => void handleDelete(t)}
+                  title="从列表移除此记录"
+                  type="button"
+                >
+                  ✕
                 </button>
               </li>
             ))}

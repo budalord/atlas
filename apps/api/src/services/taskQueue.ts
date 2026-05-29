@@ -19,7 +19,7 @@ import type {
 } from "@atlas/shared";
 import { featureFilePath, loadFeature } from "./entityLoader";
 import { parseFeatureMarkdown } from "./featureParser";
-import { runCodex, runCodexMultiFile } from "./codexRunner";
+import { runCodex, runCodexMultiFile, cancelCodexRun } from "./codexRunner";
 import { bumpDataVersion } from "./watcher";
 import {
   AGENT_SELF_DECISION_PRINCIPLE,
@@ -119,7 +119,8 @@ function setStage(t: InternalTask, stage: TaskStage, extra?: Partial<InternalTas
   // 队列状态变化让前端 SSE 拉一次
   bumpDataVersion(`task:${t.id}:${stage}`);
   // v0.2c §5.6c: 终态时落盘 task-history (best-effort, 失败不影响 task 状态)
-  if (stage === "completed" || stage === "rejected" || stage === "failed") {
+  // 已被 deleteTask 移出队列的任务 (如取消运行中) 不写 history, 避免脏记录。
+  if ((stage === "completed" || stage === "rejected" || stage === "failed") && tasks.includes(t)) {
     const view = publicView(t);
     void appendTaskHistory(buildHistoryRecord(view, stage)).catch((e) => {
       console.warn(`task-history append failed for ${t.id}:`, e);
@@ -633,6 +634,38 @@ export async function rejectTask(taskId: string): Promise<Task | { error: string
   }
   setStage(t, "rejected", { finishedAt: new Date().toISOString() });
   return publicView(t);
+}
+
+/**
+ * 删除/取消任务, 从队列里整个移除 (UI 上消失)。 按 stage 处理:
+ *   - queued: 还没跑, 直接移除 (不会被 tick 选中)。
+ *   - running: 杀掉 codex 子进程再移除; 可能留下半截写盘的文件 (agent 重跑可修)。
+ *   - awaiting_review: 先把 agent 写盘的变更回滚到 backup (等同 reject), 再移除。
+ *   - completed/rejected/failed: 直接移除 (dismiss)。
+ */
+export async function deleteTask(taskId: string): Promise<{ ok: true } | { error: string }> {
+  const idx = tasks.findIndex((x) => x.id === taskId);
+  if (idx < 0) return { error: "task not found" };
+  const t = tasks[idx];
+
+  if (t.stage === "running") {
+    cancelCodexRun(t.id);
+  }
+
+  if (t.stage === "awaiting_review") {
+    if (t.kind === "feature-refine") {
+      const filePath = featureFilePath(t.payload.productId, t.payload.moduleName, t.payload.featureId);
+      await fs.unlink(`${filePath}.draft`).catch(() => undefined);
+    } else {
+      // batch kinds: 回滚 agent 写盘的变更 + 清 backup
+      await restoreFromBackups(t.payload.productDir, t.id, t.changedFiles ?? []).catch(() => undefined);
+      await clearBackups(t.payload.productDir, t.id).catch(() => undefined);
+    }
+  }
+
+  tasks.splice(idx, 1);
+  bumpDataVersion(`task:delete:${taskId}`);
+  return { ok: true };
 }
 
 export async function retryTask(

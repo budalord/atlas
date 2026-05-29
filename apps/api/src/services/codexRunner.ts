@@ -41,6 +41,24 @@ export interface CodexRunOptions {
    * 解析逻辑 in extractStepFromCodexEvent.
    */
   onStep?: (label: string) => void;
+  /** 注册到进程表的 key, 用于外部 cancelCodexRun(taskId) 杀进程。 */
+  taskId?: string;
+}
+
+/** 运行中的 codex 子进程表 (taskId → child), 供 cancelCodexRun 终止。 */
+const runningChildren = new Map<string, ReturnType<typeof spawn>>();
+
+/** 终止运行中的 codex 进程 (delete 运行中任务用)。返回是否找到并杀了进程。 */
+export function cancelCodexRun(taskId: string): boolean {
+  const child = runningChildren.get(taskId);
+  if (!child) return false;
+  try {
+    child.kill("SIGKILL");
+  } catch {
+    /* ignore */
+  }
+  runningChildren.delete(taskId);
+  return true;
 }
 
 /**
@@ -91,7 +109,8 @@ export async function runCodex({
   cwd,
   timeoutMs = 5 * 60_000,
   sandbox = "read-only",
-  onStep
+  onStep,
+  taskId
 }: CodexRunOptions): Promise<CodexResult> {
   const outFile = path.join(tmpdir(), `atlas-codex-${randomUUID()}.out`);
 
@@ -135,6 +154,12 @@ export async function runCodex({
       return;
     }
 
+    // 注册到进程表, 供 cancelCodexRun 终止; settle 时清理。
+    if (taskId) runningChildren.set(taskId, child);
+    const deregister = () => {
+      if (taskId) runningChildren.delete(taskId);
+    };
+
     let stdout = "";
     let stderr = "";
     let timedOut = false;
@@ -174,6 +199,7 @@ export async function runCodex({
 
     child.on("error", (err: NodeJS.ErrnoException) => {
       clearTimeout(timer);
+      deregister();
       if (err.code === "ENOENT") {
         resolve({
           ok: false,
@@ -197,6 +223,7 @@ export async function runCodex({
 
     child.on("close", async (exitCode) => {
       clearTimeout(timer);
+      deregister();
       if (timedOut) {
         resolve({
           ok: false,
@@ -338,7 +365,8 @@ export async function runCodexMultiFile(
     cwd: opts.cwd,
     timeoutMs: opts.timeoutMs,
     sandbox: "workspace-write",
-    onStep: opts.onStep
+    onStep: opts.onStep,
+    taskId: opts.taskId
   });
   if (!raw.ok) {
     return { ok: false, error: raw.error, changedFiles: [], raw };

@@ -8,7 +8,8 @@ import {
   retryTask,
   enqueueBatch,
   acceptChangesetFile,
-  rejectChangesetFile
+  rejectChangesetFile,
+  deleteTask
 } from "../services/taskQueue";
 import type { TaskKind } from "@atlas/shared";
 import { getDataVersion } from "../services/watcher";
@@ -107,6 +108,19 @@ tasksRouter.post("/:tid/reject", async (req: TaskReq, res, next) => {
     const result = await rejectTask(req.params.tid);
     if ("error" in result) {
       res.status(400).json({ error: result.error });
+      return;
+    }
+    res.json({ data: result, version: getDataVersion() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+tasksRouter.delete("/:tid", async (req: TaskReq, res, next) => {
+  try {
+    const result = await deleteTask(req.params.tid);
+    if ("error" in result) {
+      res.status(404).json({ error: result.error });
       return;
     }
     res.json({ data: result, version: getDataVersion() });
