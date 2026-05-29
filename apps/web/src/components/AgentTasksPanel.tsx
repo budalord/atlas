@@ -1,37 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
 import { useDataChange } from "../lib/useDataChange";
 import { useUiStore } from "../stores/uiStore";
-import type { ApiEnvelope, Task, TaskKind, TaskStage } from "../types";
+import type { ApiEnvelope, Task, TaskStage } from "../types";
 import { ReviewChangesetModal } from "./ReviewChangesetModal";
 
 interface AgentTasksPanelProps {
   productId: string;
 }
 
-const BATCH_KINDS: ReadonlyArray<Exclude<TaskKind, "feature-refine">> = [
-  "feature-revise",
-  "usecase-revise",
-  "screen-generate",
-  "screen-revise"
-];
-
-const BATCH_LABELS: Record<Exclude<TaskKind, "feature-refine">, string> = {
-  "feature-revise": "Run feature revise",
-  "usecase-revise": "Run usecase revise",
-  "screen-generate": "Run screen generate",
-  "screen-revise": "Run screen revise"
-};
-
 /**
- * 产品内嵌的 agent 任务面板:展示该产品的「当前任务」+「最近完成 5 条」。
- * v0.2b1: 顶部加 4 个 batch kind 触发按钮; batch task 点击进 ReviewChangesetModal,
- * feature-refine task 点击仍走 FeatureDrawer。
+ * 产品内嵌的 agent 任务态全局条:展示该产品的「当前任务」(running 实时 step +
+ * 待审 Modal 入口)+「最近完成 5 条」。常驻 tab 栏之上,跨 tab 可见,避免漏审。
+ * 触发按钮已下沉到对应 tab(见 AgentTaskTriggers);无任何任务时整块隐藏。
+ * batch task 点击进 ReviewChangesetModal,feature-refine task 点击仍走 FeatureDrawer。
  */
 export function AgentTasksPanel({ productId }: AgentTasksPanelProps) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [reviewTask, setReviewTask] = useState<Task | null>(null);
-  const [runBusy, setRunBusy] = useState(false);
-  const [runError, setRunError] = useState<string | null>(null);
   const requestFeatureOpen = useUiStore((s) => s.requestFeatureOpen);
 
   const load = async () => {
@@ -42,27 +27,6 @@ export function AgentTasksPanel({ productId }: AgentTasksPanelProps) {
       setTasks(json.data.filter((t) => t.productId === productId));
     } catch {
       /* ignore */
-    }
-  };
-
-  const triggerBatch = async (kind: Exclude<TaskKind, "feature-refine">) => {
-    if (runBusy) return;
-    setRunBusy(true);
-    setRunError(null);
-    try {
-      const res = await fetch("/api/tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productId, kind })
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        setRunError(body.error ?? `enqueue failed: ${res.status}`);
-        return;
-      }
-      await load();
-    } finally {
-      setRunBusy(false);
     }
   };
 
@@ -101,6 +65,8 @@ export function AgentTasksPanel({ productId }: AgentTasksPanelProps) {
     return { active, recent };
   }, [tasks]);
 
+  if (buckets.active.length === 0 && buckets.recent.length === 0) return null;
+
   return (
     <section className="space-y-3 border-b border-slate-200 bg-white px-6 py-4">
       <div className="flex items-baseline justify-between">
@@ -110,27 +76,6 @@ export function AgentTasksPanel({ productId }: AgentTasksPanelProps) {
           {buckets.recent.length > 0 ? ` · ${buckets.recent.length} 个最近完成` : ""}
         </span>
       </div>
-
-      <div className="flex flex-wrap gap-1.5">
-        {BATCH_KINDS.map((k) => (
-          <button
-            className="rounded border border-indigo-300 bg-white px-2.5 py-1 text-[11px] font-medium text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-50"
-            disabled={runBusy}
-            key={k}
-            onClick={() => triggerBatch(k)}
-            type="button"
-          >
-            {BATCH_LABELS[k]}
-          </button>
-        ))}
-      </div>
-      {runError ? <p className="text-xs text-rose-600">{runError}</p> : null}
-
-      {buckets.active.length === 0 && buckets.recent.length === 0 ? (
-        <p className="text-xs text-slate-500">
-          暂无 agent 任务记录。点上面按钮触发 batch,或在「功能点」抽屉点「处理 pending 线索」启动单 feature refine。
-        </p>
-      ) : null}
 
       {buckets.active.length > 0 ? (
         <ul className="space-y-2">

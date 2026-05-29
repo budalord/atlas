@@ -16,6 +16,7 @@ import { FeatureOverlapBanner } from "../FeatureOverlapBanner";
 import { GlobalFeedbackPanel } from "../GlobalFeedbackPanel";
 import { PromptModalDialog, type PromptMode } from "../PromptModalDialog";
 import { UseCaseModal } from "../UseCaseModal";
+import { AgentTaskTriggers } from "../AgentTaskTriggers";
 
 interface FeatureTabProps {
   productId: string;
@@ -379,6 +380,13 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
       <div className="flex min-h-0 flex-1 flex-col">
         <FeatureOverlapBanner productId={productId} readOnly={readOnly} />
         <GlobalFeedbackPanel productId={productId} scope="feature" />
+        {!readOnly ? (
+          <AgentTaskTriggers
+            className="px-5 pt-3"
+            kinds={["feature-revise", "usecase-revise"]}
+            productId={productId}
+          />
+        ) : null}
         <div className="px-5 pt-3 pb-2 text-[11px] text-slate-500">
           <span className="font-medium text-slate-700">{data.length}</span> 个模块 ·{" "}
           <span className="font-medium text-slate-700">

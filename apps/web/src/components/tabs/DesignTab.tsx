@@ -11,6 +11,7 @@ import { MarkdownRenderer } from "../MarkdownRenderer";
 import { GlobalFeedbackPanel } from "../GlobalFeedbackPanel";
 import { PromptModalDialog, type PromptMode } from "../PromptModalDialog";
 import { ScreenList } from "../ScreenList";
+import { AgentTaskTriggers } from "../AgentTaskTriggers";
 
 interface DesignTabProps {
   productId: string;
@@ -176,16 +177,24 @@ export function DesignTab({ productId, readOnly = false, openName, onOpenDesign 
             Designs (遗留)
           </button>
         </div>
-        {view === "designs" ? (
-          <button
-            className="rounded border border-slate-300 bg-white px-3 py-1 text-[11px] font-medium text-slate-700 hover:border-slate-900 hover:text-slate-900"
-            onClick={() => setPromptOpen("generate")}
-            title="基于现有 features 生成原型对应关系的 prompt(已转发到 Screen generate)"
-            type="button"
-          >
-            生成原型对应
-          </button>
-        ) : null}
+        <div className="flex items-center gap-2">
+          {!readOnly && view === "screens" ? (
+            <AgentTaskTriggers
+              kinds={["screen-generate", "screen-revise"]}
+              productId={productId}
+            />
+          ) : null}
+          {view === "designs" ? (
+            <button
+              className="rounded border border-slate-300 bg-white px-3 py-1 text-[11px] font-medium text-slate-700 hover:border-slate-900 hover:text-slate-900"
+              onClick={() => setPromptOpen("generate")}
+              title="基于现有 features 生成原型对应关系的 prompt(已转发到 Screen generate)"
+              type="button"
+            >
+              生成原型对应
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {view === "screens" ? (
