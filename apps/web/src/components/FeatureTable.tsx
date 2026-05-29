@@ -6,17 +6,14 @@ import {
   statusDistribution,
   type FeatureGroup
 } from "../lib/featureGrouping";
-import { featureLevelPrompt, groupLevelPrompt } from "../lib/promptTemplates";
 import { statusChipClass } from "../lib/statusTone";
 import type { FeatureSpec } from "../types";
-import { CopyPromptButton } from "./CopyPromptButton";
 
 interface FeatureTableProps {
   features: FeatureSpec[];
-  productId: string;
 }
 
-export function FeatureTable({ features, productId }: FeatureTableProps) {
+export function FeatureTable({ features }: FeatureTableProps) {
   const groups = useMemo(() => groupFeatures(features), [features]);
 
   const defaultOpen = useMemo(() => {
@@ -78,7 +75,6 @@ export function FeatureTable({ features, productId }: FeatureTableProps) {
           <FeatureGroupPanel
             key={group.key}
             group={group}
-            productId={productId}
             open={!!openMap[group.key]}
             onToggle={() => toggleGroup(group.key)}
           />
@@ -90,18 +86,12 @@ export function FeatureTable({ features, productId }: FeatureTableProps) {
 
 interface FeatureGroupPanelProps {
   group: FeatureGroup;
-  productId: string;
   open: boolean;
   onToggle: () => void;
 }
 
-function FeatureGroupPanel({ group, productId, open, onToggle }: FeatureGroupPanelProps) {
+function FeatureGroupPanel({ group, open, onToggle }: FeatureGroupPanelProps) {
   const distribution = useMemo(() => statusDistribution(group.features), [group.features]);
-
-  const groupPrompt = useMemo(
-    () => groupLevelPrompt(productId, group.label, group.features),
-    [group.features, group.label, productId]
-  );
 
   return (
     <div className="group/grp overflow-hidden rounded-md border border-slate-200 bg-white">
@@ -128,9 +118,6 @@ function FeatureGroupPanel({ group, productId, open, onToggle }: FeatureGroupPan
             <span className="text-xs text-slate-500">{distribution}</span>
           )}
         </button>
-        <div className="opacity-0 transition group-hover/grp:opacity-100 focus-within:opacity-100">
-          <CopyPromptButton label="复制本页全部指令" prompt={groupPrompt} size="sm" />
-        </div>
       </div>
 
       {open && (
@@ -144,7 +131,6 @@ function FeatureGroupPanel({ group, productId, open, onToggle }: FeatureGroupPan
                 <th className="w-20 px-3 py-2">优先级</th>
                 <th className="w-40 px-3 py-2">接口</th>
                 <th className="px-3 py-2">备注</th>
-                <th className="w-24 px-3 py-2">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 bg-white">
@@ -160,13 +146,6 @@ function FeatureGroupPanel({ group, productId, open, onToggle }: FeatureGroupPan
                   <td className="px-3 py-3 text-slate-700">{feature.priority}</td>
                   <td className="break-words px-3 py-3 font-mono text-xs text-slate-700">{feature.endpoint}</td>
                   <td className="px-3 py-3 text-slate-600">{feature.notes}</td>
-                  <td className="px-3 py-3">
-                    <CopyPromptButton
-                      label="指令"
-                      prompt={featureLevelPrompt(productId, feature)}
-                      size="sm"
-                    />
-                  </td>
                 </tr>
               ))}
             </tbody>

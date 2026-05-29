@@ -13,6 +13,8 @@ import type {
   ActorReviseTask,
   EntityReviseTask,
   EntityDeriveTask,
+  FeatureGenerateTask,
+  ConventionsGenerateTask,
   ChangedFile
 } from "@atlas/shared";
 import { featureFilePath, loadFeature } from "./entityLoader";
@@ -28,7 +30,12 @@ import {
   buildActorRevisePrompt,
   buildEntityRevisePrompt
 } from "./revisePromptBuilder";
-import { buildScreenGeneratePrompt, buildEntityDerivePrompt } from "./generatePromptBuilder";
+import {
+  buildScreenGeneratePrompt,
+  buildEntityDerivePrompt,
+  buildFeatureGeneratePrompt,
+  buildConventionsGeneratePrompt
+} from "./generatePromptBuilder";
 import { restoreFromBackups, clearBackups } from "./changesetTracker";
 import { dataPath } from "./fileReader";
 import { appendTaskHistory, buildHistoryRecord } from "./taskHistory";
@@ -67,7 +74,9 @@ type InternalTask =
   | (ScreenReviseTask & { payload: BatchPayload })
   | (ActorReviseTask & { payload: BatchPayload })
   | (EntityReviseTask & { payload: BatchPayload })
-  | (EntityDeriveTask & { payload: BatchPayload });
+  | (EntityDeriveTask & { payload: BatchPayload })
+  | (FeatureGenerateTask & { payload: BatchPayload })
+  | (ConventionsGenerateTask & { payload: BatchPayload });
 
 const tasks: InternalTask[] = [];
 let running = false;
@@ -215,6 +224,12 @@ async function runOne(t: InternalTask): Promise<void> {
       case "entity-derive":
         await runBatchRevise(t, buildEntityDerivePrompt);
         return;
+      case "feature-generate":
+        await runBatchRevise(t, buildFeatureGeneratePrompt);
+        return;
+      case "conventions-generate":
+        await runBatchRevise(t, buildConventionsGeneratePrompt);
+        return;
     }
   } catch (err) {
     setStage(t, "failed", {
@@ -304,7 +319,9 @@ type BatchTask =
   | (ScreenReviseTask & { payload: BatchPayload })
   | (ActorReviseTask & { payload: BatchPayload })
   | (EntityReviseTask & { payload: BatchPayload })
-  | (EntityDeriveTask & { payload: BatchPayload });
+  | (EntityDeriveTask & { payload: BatchPayload })
+  | (FeatureGenerateTask & { payload: BatchPayload })
+  | (ConventionsGenerateTask & { payload: BatchPayload });
 
 type PromptBuilder = (productId: string) => Promise<{ prompt: string }>;
 
@@ -694,6 +711,8 @@ function batchTaskTitle(kind: Exclude<TaskKind, "feature-refine">): string {
     case "actor-revise": return "Revise actors (batch)";
     case "entity-revise": return "Revise entities (batch)";
     case "entity-derive": return "Derive entities (batch)";
+    case "feature-generate": return "Generate features (batch)";
+    case "conventions-generate": return "Generate conventions (batch)";
   }
 }
 

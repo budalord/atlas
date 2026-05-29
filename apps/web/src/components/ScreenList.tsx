@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ApiEnvelope, Screen, ScreenSummary, ScreenValidationIssue } from "../types";
 import { MarkdownRenderer } from "./MarkdownRenderer";
-import { PromptModalDialog, type PromptMode } from "./PromptModalDialog";
 import { useDataChange } from "../lib/useDataChange";
 
 interface ScreenListProps {
@@ -15,9 +14,7 @@ type DetailedScreen = Screen & { validation_issues?: ScreenValidationIssue[] };
  * 双轨设计 · Screen 子视图(v0.1)。
  *
  * 左侧按 module 分组列出 screens, 右侧渲染 markdown + validation issues + 反馈池操作。
- * 顶部按钮:
- *   - 复制 generate prompt — 调 PromptModalDialog scope=screen
- *   - 复制 revise prompt
+ * 生成/更新 screen 由「双轨设计」tab 头部的「生成屏幕 / 更新屏幕」agent batch 按钮触发。
  *
  * 不在此处做 inline 编辑(v0.1 范围: agent 写盘, UI 只读 + 反馈)。
  */
@@ -28,7 +25,6 @@ export function ScreenList({ productId, readOnly = false }: ScreenListProps) {
   const [error, setError] = useState<string | null>(null);
   const [feedbackInput, setFeedbackInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [promptOpen, setPromptOpen] = useState<PromptMode | null>(null);
 
   const loadList = useCallback(async () => {
     try {
@@ -136,30 +132,9 @@ export function ScreenList({ productId, readOnly = false }: ScreenListProps) {
             共 {list.length} 个 · 按 module 分组
           </div>
         </div>
-        {!readOnly ? (
-          <div className="flex items-center gap-2 border-b border-slate-200 px-3 py-2">
-            <button
-              className="flex-1 rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:border-slate-900"
-              onClick={() => setPromptOpen("generate")}
-              type="button"
-              title="基于现有 usecase + entity, agent 反推 Screen 草稿"
-            >
-              + 复制 generate prompt
-            </button>
-            <button
-              className="flex-1 rounded border border-slate-300 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:border-slate-900"
-              onClick={() => setPromptOpen("revise")}
-              type="button"
-              title="批量处理所有 needs_revision=true 的 screen"
-            >
-              复制 revise prompt
-            </button>
-          </div>
-        ) : null}
-
         {grouped.length === 0 ? (
           <div className="px-4 py-6 text-xs text-slate-400">
-            该产品暂无 Screen。点上面「复制 generate prompt」让 agent 反推。
+            该产品暂无 Screen。用上方「生成屏幕」让 agent 反推。
           </div>
         ) : (
           <ul className="divide-y divide-slate-100">
@@ -333,15 +308,6 @@ export function ScreenList({ productId, readOnly = false }: ScreenListProps) {
           <div className="p-10 text-center text-sm text-slate-400">选一个 Screen 查看详情</div>
         )}
       </div>
-
-      {promptOpen ? (
-        <PromptModalDialog
-          productId={productId}
-          mode={promptOpen}
-          scope="screen"
-          onClose={() => setPromptOpen(null)}
-        />
-      ) : null}
     </div>
   );
 }

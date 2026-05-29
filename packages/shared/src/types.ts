@@ -746,7 +746,9 @@ export type TaskKind =
   | "screen-revise"
   | "actor-revise"
   | "entity-revise"
-  | "entity-derive";
+  | "entity-derive"
+  | "feature-generate"
+  | "conventions-generate";
 
 /** batch kinds 跑完后, 由 changesetTracker 反推的单条文件变更。 */
 export interface ChangedFile {
@@ -835,6 +837,14 @@ export interface EntityDeriveTask extends BaseTask {
   kind: "entity-derive";
 }
 
+export interface FeatureGenerateTask extends BaseTask {
+  kind: "feature-generate";
+}
+
+export interface ConventionsGenerateTask extends BaseTask {
+  kind: "conventions-generate";
+}
+
 export type Task =
   | FeatureRefineTask
   | FeatureReviseTask
@@ -843,7 +853,9 @@ export type Task =
   | ScreenReviseTask
   | ActorReviseTask
   | EntityReviseTask
-  | EntityDeriveTask;
+  | EntityDeriveTask
+  | FeatureGenerateTask
+  | ConventionsGenerateTask;
 
 /** 兼容别名: 旧代码用 RefineTask = FeatureRefineTask */
 export type RefineTask = FeatureRefineTask;

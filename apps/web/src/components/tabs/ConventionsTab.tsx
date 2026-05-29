@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { ApiEnvelope, L0ViolationsData } from "../../types";
 import { useDataChange } from "../../lib/useDataChange";
 import { MarkdownRenderer } from "../MarkdownRenderer";
-import { PromptModalDialog, type PromptMode } from "../PromptModalDialog";
+import { AgentTaskTriggers } from "../AgentTaskTriggers";
 
 interface ConventionsTabProps {
   productId: string;
@@ -27,7 +27,6 @@ interface ConventionsData {
 export function ConventionsTab({ productId, readOnly = false }: ConventionsTabProps) {
   const [data, setData] = useState<ConventionsData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [promptOpen, setPromptOpen] = useState<PromptMode | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -62,28 +61,17 @@ export function ConventionsTab({ productId, readOnly = false }: ConventionsTabPr
             L0 规范装产品级硬约束(命名/字段/通用流程/一致性/禁忌/决策快照六段),
             Agent 在 L1(实体)/ L2(功能点)操作时必须遵循。
             <br />
-            点击下方按钮生成提示词,把它丢给 Claude Code 让规范 Agent 写 CONVENTIONS.md。
+            点击下方按钮,让规范 Agent 从产品信息生成 CONVENTIONS.md。
           </div>
           {!readOnly ? (
-            <button
-              className="rounded-lg border-2 border-slate-900 bg-white px-5 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-900 hover:text-white"
-              onClick={() => setPromptOpen("generate")}
-              type="button"
-            >
-              生成 L0 规范
-            </button>
+            <AgentTaskTriggers
+              productId={productId}
+              triggers={[{ label: "生成 L0 规范", kinds: ["conventions-generate"] }]}
+            />
           ) : null}
         </div>
         {/* L0 违规检测不依赖 CONVENTIONS.md(检 frontmatter / 命名 / 引用 等机械规则) */}
         <L0ViolationsPanel productId={productId} />
-        {promptOpen ? (
-          <PromptModalDialog
-            mode={promptOpen}
-            onClose={() => setPromptOpen(null)}
-            productId={productId}
-            scope="conventions"
-          />
-        ) : null}
       </div>
     );
   }
@@ -98,28 +86,16 @@ export function ConventionsTab({ productId, readOnly = false }: ConventionsTabPr
           ) : null}
         </div>
         {!readOnly ? (
-          <button
-            className="rounded border border-slate-300 bg-white px-3 py-1 text-[11px] font-medium text-slate-700 hover:border-slate-900 hover:text-slate-900"
-            onClick={() => setPromptOpen("generate")}
-            title="生成/更新 L0 规范 prompt(给规范 Agent)"
-            type="button"
-          >
-            生成/更新 L0 规范
-          </button>
+          <AgentTaskTriggers
+            productId={productId}
+            triggers={[{ label: "生成/更新 L0 规范", kinds: ["conventions-generate"] }]}
+          />
         ) : null}
       </div>
       <div className="overflow-auto px-6 py-4">
         <MarkdownRenderer markdown={data.content ?? ""} />
         <L0ViolationsPanel productId={productId} />
       </div>
-      {promptOpen ? (
-        <PromptModalDialog
-          mode={promptOpen}
-          onClose={() => setPromptOpen(null)}
-          productId={productId}
-          scope="conventions"
-        />
-      ) : null}
     </div>
   );
 }

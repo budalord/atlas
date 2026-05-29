@@ -2,14 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { extractSection, parseKeyValueLines } from "../lib/markdown";
 import { TAB_LABELS, tabsForPhase, type TabKey } from "../lib/phaseTabs";
 import { statusToPhase } from "../lib/productPhase";
-import { productLevelPrompt } from "../lib/promptTemplates";
 import { useDataChange } from "../lib/useDataChange";
 import type { ApiEnvelope, ModuleWithFeatures, Product, ProductVision } from "../types";
 import { AdditionalDocsPanel } from "./AdditionalDocsPanel";
 import { AgentTasksPanel } from "./AgentTasksPanel";
 import { RecentActivityStrip } from "./RecentActivityStrip";
 import { CommitList } from "./CommitList";
-import { CopyPromptButton } from "./CopyPromptButton";
 import { FeatureTable } from "./FeatureTable";
 import { GitHubPanel } from "./GitHubPanel";
 import { MarkdownRenderer } from "./MarkdownRenderer";
@@ -84,7 +82,6 @@ export function ProductDetail({ product }: ProductDetailProps) {
               <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">{product.meta.tagline}</p>
             ) : null}
           </div>
-          <CopyPromptButton prompt={productLevelPrompt(product)} />
         </div>
         <dl className="mt-5 flex flex-wrap gap-x-6 gap-y-2 text-xs text-slate-600">
           <MetaInline label="更新" value={product.last_updated ?? "未填写"} />
@@ -308,7 +305,7 @@ function FeaturesOverview({ product }: { product: Product }) {
           ))}
         </div>
       ) : (
-        <FeatureTable features={product.features} productId={product.id} />
+        <FeatureTable features={product.features} />
       )}
     </div>
   );

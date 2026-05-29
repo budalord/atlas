@@ -14,7 +14,6 @@ import { FeatureHoverCard } from "../FeatureHoverCard";
 import { FeatureModal } from "../FeatureModal";
 import { FeatureOverlapBanner } from "../FeatureOverlapBanner";
 import { GlobalFeedbackPanel } from "../GlobalFeedbackPanel";
-import { PromptModalDialog, type PromptMode } from "../PromptModalDialog";
 import { UseCaseModal } from "../UseCaseModal";
 import { AgentTaskTriggers } from "../AgentTaskTriggers";
 
@@ -71,8 +70,6 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
   useEffect(() => {
     dataRef.current = data;
   }, [data]);
-
-  const [promptOpen, setPromptOpen] = useState<PromptMode | null>(null);
 
   const svgRef = useRef<SVGSVGElement | null>(null);
   const mmRef = useRef<Markmap | null>(null);
@@ -352,23 +349,12 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
         <div className="max-w-md text-center text-xs leading-5 text-slate-400">
           老结构产品使用 STATUS.md 6 列表,请在「概览」tab 查看。
           <br />
-          新产品请点下方按钮拿到 prompt,丢给 Claude Code 让大 Agent 生成 modules + features。
+          新产品点下方按钮,让 agent 从产品基础信息生成 modules + features 骨架。
         </div>
         {!readOnly ? (
-          <button
-            className="rounded-lg border-2 border-slate-900 bg-white px-5 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-900 hover:text-white"
-            onClick={() => setPromptOpen("generate")}
-            type="button"
-          >
-            生成功能点骨架
-          </button>
-        ) : null}
-        {promptOpen ? (
-          <PromptModalDialog
-            mode={promptOpen}
-            onClose={() => setPromptOpen(null)}
+          <AgentTaskTriggers
             productId={productId}
-            scope="feature"
+            triggers={[{ label: "生成功能点骨架", kinds: ["feature-generate"] }]}
           />
         ) : null}
       </div>
@@ -410,14 +396,6 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
             className="h-full w-full cursor-pointer"
             style={{ touchAction: "none" }}
           />
-          <button
-            className="absolute bottom-4 right-4 rounded-full bg-slate-900 px-4 py-2 text-xs font-medium text-white shadow-lg hover:bg-slate-800"
-            onClick={() => setPromptOpen("revise")}
-            title="把 needs_revision=true 的 feature 反馈 + 全局需求 拼成 prompt 给 Claude Code 跑"
-            type="button"
-          >
-            复制全局 revise prompt
-          </button>
         </div>
       </div>
       {/* hover card; 开了 FeatureModal 就不再叠浮卡(避免视觉打架) */}
@@ -467,14 +445,6 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
           module={openUseCase.module}
           onClose={() => setOpenUseCase(null)}
           productId={productId}
-        />
-      ) : null}
-      {promptOpen ? (
-        <PromptModalDialog
-          mode={promptOpen}
-          onClose={() => setPromptOpen(null)}
-          productId={productId}
-          scope="feature"
         />
       ) : null}
     </div>

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ApiEnvelope, Feedback, UseCase } from "../types";
 import { MarkdownRenderer } from "./MarkdownRenderer";
-import { PromptModalDialog } from "./PromptModalDialog";
 
 interface UseCaseModalProps {
   productId: string;
@@ -17,7 +16,7 @@ interface UseCaseModalProps {
  * v0.2a 升级:
  *   - 展示 ## 反馈池(parser 已聚合到 UseCase.feedback)
  *   - 「记反馈」按钮 → POST /api/products/:id/feedback target=usecase:<m>:<fn>:<u>
- *   - 「复制 revise prompt」按钮 → PromptModalDialog scope=usecase
+ *     (usecase revise 改由「功能与用例」tab 的合并按钮跑 agent batch)
  *   - frontmatter.split_suggestion 顶部黄色 banner + 「已处理」按钮(PATCH split_suggestion=null)
  */
 export function UseCaseModal({
@@ -32,7 +31,6 @@ export function UseCaseModal({
   const [error, setError] = useState<string | null>(null);
   const [feedbackInput, setFeedbackInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [promptOpen, setPromptOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -170,14 +168,6 @@ export function UseCaseModal({
           </div>
           <div className="flex items-center gap-2">
             <button
-              className="rounded border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-700 hover:border-slate-500"
-              onClick={() => setPromptOpen(true)}
-              type="button"
-              title="复制本产品全部 needs_revision usecase 的 revise prompt"
-            >
-              复制 revise prompt
-            </button>
-            <button
               className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
               onClick={onClose}
               type="button"
@@ -305,15 +295,6 @@ export function UseCaseModal({
           ) : null}
         </div>
       </div>
-
-      {promptOpen ? (
-        <PromptModalDialog
-          productId={productId}
-          mode="revise"
-          scope="usecase"
-          onClose={() => setPromptOpen(false)}
-        />
-      ) : null}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ReactDiffViewer, { DiffMethod } from "react-diff-viewer-continued";
 import type { ApiEnvelope, ChangedFile, Task } from "../types";
 import { useDataChange } from "../lib/useDataChange";
@@ -21,6 +21,9 @@ export function ReviewChangesetModal({ task, onClose }: ReviewChangesetModalProp
   const [error, setError] = useState<string | null>(null);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  // 同步防抖: state 更新非同步, 同帧双击会两次都读到 busy=false → 两次 POST。
+  // 用 ref 做真正的 in-flight 闸 (busy state 仅用于按钮 disabled 视觉)。
+  const inFlight = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -46,7 +49,8 @@ export function ReviewChangesetModal({ task, onClose }: ReviewChangesetModalProp
   const taskActive = task.stage === "awaiting_review";
 
   const handleSingle = async (idx: number, action: "accept" | "reject") => {
-    if (busy) return;
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     try {
       const res = await fetch(`/api/tasks/${task.id}/changeset/${idx}/${action}`, { method: "POST" });
@@ -56,12 +60,14 @@ export function ReviewChangesetModal({ task, onClose }: ReviewChangesetModalProp
       }
       await load();
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   };
 
   const handleAll = async (action: "approve" | "reject") => {
-    if (busy) return;
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     try {
       const res = await fetch(`/api/tasks/${task.id}/${action}`, { method: "POST" });
@@ -72,6 +78,7 @@ export function ReviewChangesetModal({ task, onClose }: ReviewChangesetModalProp
       }
       onClose();
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   };

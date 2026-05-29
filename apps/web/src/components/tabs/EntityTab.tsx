@@ -9,7 +9,6 @@ import type {
 import { useDataChange } from "../../lib/useDataChange";
 import { GlobalFeedbackPanel } from "../GlobalFeedbackPanel";
 import { MarkdownRenderer } from "../MarkdownRenderer";
-import { PromptModalDialog } from "../PromptModalDialog";
 import { AgentTaskTriggers } from "../AgentTaskTriggers";
 
 interface EntityTabProps {
@@ -40,7 +39,6 @@ export function EntityTab({ productId, readOnly = false }: EntityTabProps) {
   const [entitiesData, setEntitiesData] = useState<DerivedEntitiesData | null>(null);
   const [questionsData, setQuestionsData] = useState<DerivedEntityQuestionsData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [promptOpen, setPromptOpen] = useState(false);
   const [selectedName, setSelectedName] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -105,20 +103,13 @@ export function EntityTab({ productId, readOnly = false }: EntityTabProps) {
 
       <GlobalFeedbackPanel productId={productId} scope="entity" />
 
-      <ToolBar
-        entitiesData={entitiesData}
-        readOnly={readOnly}
-        onOpenPrompt={() => setPromptOpen(true)}
-      />
+      <ToolBar entitiesData={entitiesData} />
 
       {!readOnly ? (
         <AgentTaskTriggers
           className="px-5 pb-2"
           productId={productId}
-          triggers={[
-            { label: "派生实体", kinds: ["entity-derive"] },
-            { label: "更新实体", kinds: ["entity-revise"] }
-          ]}
+          triggers={[{ label: "更新实体", kinds: ["entity-derive", "entity-revise"] }]}
         />
       ) : null}
 
@@ -157,7 +148,7 @@ export function EntityTab({ productId, readOnly = false }: EntityTabProps) {
       ) : null}
 
       {!entitiesData.exists ? (
-        <EmptyState onOpenPrompt={() => setPromptOpen(true)} readOnly={readOnly} />
+        <EmptyState productId={productId} readOnly={readOnly} />
       ) : (
         // master-detail: 左 list 正常 flow (跟随 main 滚动), 右 detail sticky 在视口顶端,
         // 不管用户滚到列表多深, 右侧详情始终可见
@@ -172,15 +163,6 @@ export function EntityTab({ productId, readOnly = false }: EntityTabProps) {
           </div>
         </div>
       )}
-
-      {promptOpen ? (
-        <PromptModalDialog
-          mode="generate"
-          onClose={() => setPromptOpen(false)}
-          productId={productId}
-          scope="entity-derive"
-        />
-      ) : null}
     </div>
   );
 }
@@ -214,15 +196,7 @@ function SimpleBanner({
 /* ============================================================
  *  顶部工具栏
  * ============================================================ */
-function ToolBar({
-  entitiesData,
-  readOnly,
-  onOpenPrompt
-}: {
-  entitiesData: DerivedEntitiesData;
-  readOnly: boolean;
-  onOpenPrompt: () => void;
-}) {
+function ToolBar({ entitiesData }: { entitiesData: DerivedEntitiesData }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-5 py-2">
       <div className="text-[11px] text-slate-500">
@@ -234,21 +208,11 @@ function ToolBar({
           <span>尚无派生实体</span>
         )}
       </div>
-      {!readOnly ? (
-        <button
-          className="rounded border border-slate-300 bg-white px-3 py-1 text-[11px] font-medium text-slate-700 hover:border-slate-900 hover:text-slate-900"
-          onClick={onOpenPrompt}
-          title="生成派生 prompt(复制后给 agent 跑) — 读功能点+规格+我已决策的需求"
-          type="button"
-        >
-          {entitiesData.exists ? "更新实体" : "生成实体"}(读功能点 + 我的决策)
-        </button>
-      ) : null}
     </div>
   );
 }
 
-function EmptyState({ onOpenPrompt, readOnly }: { onOpenPrompt: () => void; readOnly: boolean }) {
+function EmptyState({ productId, readOnly }: { productId: string; readOnly: boolean }) {
   return (
     <div className="m-5 rounded-md border border-dashed border-slate-300 bg-white p-6 text-center text-[13px] leading-6 text-slate-600">
       <div className="text-[14px] font-medium text-slate-900">尚未生成派生实体</div>
@@ -256,13 +220,12 @@ function EmptyState({ onOpenPrompt, readOnly }: { onOpenPrompt: () => void; read
         Path C 派生从 features + SEAMS + DECISIONS + ENTITIES-OWNERSHIP + 全局需求池(entity)派生实体清单。
       </div>
       {!readOnly ? (
-        <button
-          className="mt-3 rounded bg-slate-900 px-4 py-1.5 text-[12px] text-white hover:bg-slate-800"
-          onClick={onOpenPrompt}
-          type="button"
-        >
-          复制派生 prompt
-        </button>
+        <div className="mt-3 flex justify-center">
+          <AgentTaskTriggers
+            productId={productId}
+            triggers={[{ label: "更新实体", kinds: ["entity-derive", "entity-revise"] }]}
+          />
+        </div>
       ) : null}
     </div>
   );

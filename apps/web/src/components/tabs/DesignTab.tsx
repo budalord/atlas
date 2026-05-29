@@ -9,7 +9,6 @@ import type {
 import { CreateIssueDialog } from "../CreateIssueDialog";
 import { MarkdownRenderer } from "../MarkdownRenderer";
 import { GlobalFeedbackPanel } from "../GlobalFeedbackPanel";
-import { PromptModalDialog, type PromptMode } from "../PromptModalDialog";
 import { ScreenList } from "../ScreenList";
 import { AgentTaskTriggers } from "../AgentTaskTriggers";
 
@@ -41,7 +40,6 @@ export function DesignTab({ productId, readOnly = false, openName, onOpenDesign 
   const [busy, setBusy] = useState(false);
   const [creating, setCreating] = useState(false);
   const [issueOpen, setIssueOpen] = useState(false);
-  const [promptOpen, setPromptOpen] = useState<PromptMode | null>(null);
 
   const loadList = async () => {
     try {
@@ -186,16 +184,6 @@ export function DesignTab({ productId, readOnly = false, openName, onOpenDesign 
                 { label: "更新屏幕", kinds: ["screen-revise"] }
               ]}
             />
-          ) : null}
-          {view === "designs" ? (
-            <button
-              className="rounded border border-slate-300 bg-white px-3 py-1 text-[11px] font-medium text-slate-700 hover:border-slate-900 hover:text-slate-900"
-              onClick={() => setPromptOpen("generate")}
-              title="基于现有 features 生成原型对应关系的 prompt(已转发到 Screen generate)"
-              type="button"
-            >
-              生成原型对应
-            </button>
           ) : null}
         </div>
       </div>
@@ -361,24 +349,6 @@ export function DesignTab({ productId, readOnly = false, openName, onOpenDesign 
       ) : null}
       </div>
       )}
-      {view === "designs" ? (
-        <button
-          className="fixed bottom-4 right-4 z-30 rounded-full bg-slate-900 px-4 py-2 text-xs font-medium text-white shadow-lg hover:bg-slate-800"
-          onClick={() => setPromptOpen("revise")}
-          title="原型修订 prompt(已转发到 Screen revise)"
-          type="button"
-        >
-          复制全局 revise prompt(原型)
-        </button>
-      ) : null}
-      {promptOpen ? (
-        <PromptModalDialog
-          mode={promptOpen}
-          onClose={() => setPromptOpen(null)}
-          productId={productId}
-          scope="prototype"
-        />
-      ) : null}
     </div>
   );
 }
