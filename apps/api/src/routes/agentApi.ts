@@ -15,6 +15,11 @@ import { loadFeature, loadEntity, featureFilePath } from "../services/entityLoad
 import { loadUseCases, usecasePath } from "../services/usecaseLoader";
 import { loadScreens, screenFilePath } from "../services/screenLoader";
 import { loadActor, actorsDir } from "../services/actorLoader";
+import {
+  listPendingPrototypes,
+  submitPrototype,
+  PrototypeSubmitError
+} from "../services/prototypeQueue";
 import { dataPath } from "../services/fileReader";
 import { getDataVersion, bumpDataVersion } from "../services/watcher";
 
@@ -248,6 +253,49 @@ agentApiRouter.post("/propose/:scope", async (req: Request<{ scope: string }>, r
       version: getDataVersion()
     });
   } catch (e) {
+    next(e);
+  }
+});
+
+// ============================================================
+// 原型图轨 (双轨设计 · 界面轨视觉产物) — codex 客户端 drain 会话用
+//   GET  /prototypes/pending?productId=   → 待出图队列 (needs_prototype=true 的 screen)
+//   POST /prototypes/submit               → 回传原型图, 写 preview_image + 清 flag
+// 屏规格直接复用 GET /screen/:productId/:screenId。
+// 背景见 memory: codex-prototype-image-track。一屏一闭环: 出一张立刻 submit 再出下一张。
+// ============================================================
+agentApiRouter.get("/prototypes/pending", async (req, res, next) => {
+  try {
+    const productId = typeof req.query.productId === "string" ? req.query.productId : "";
+    if (!productId) {
+      res.status(400).json({ error: "productId query required" });
+      return;
+    }
+    const data = await listPendingPrototypes(productId);
+    res.json({ data, version: getDataVersion() });
+  } catch (e) {
+    next(e);
+  }
+});
+
+agentApiRouter.post("/prototypes/submit", async (req, res, next) => {
+  try {
+    const productId = typeof req.body?.productId === "string" ? req.body.productId : "";
+    const moduleName = typeof req.body?.module === "string" ? req.body.module : "";
+    const screenId = typeof req.body?.screenId === "string" ? req.body.screenId : "";
+    const imagePath = typeof req.body?.imagePath === "string" ? req.body.imagePath : "";
+    if (!productId || !moduleName || !screenId || !imagePath) {
+      res.status(400).json({ error: "body required: productId, module, screenId, imagePath" });
+      return;
+    }
+    const result = await submitPrototype({ productId, moduleName, screenId, imagePath });
+    bumpDataVersion(`agent:prototype:submit:${moduleName}/${screenId}`);
+    res.json({ ok: true, ...result, version: getDataVersion() });
+  } catch (e) {
+    if (e instanceof PrototypeSubmitError) {
+      res.status(e.httpStatus).json({ error: e.message });
+      return;
+    }
     next(e);
   }
 });

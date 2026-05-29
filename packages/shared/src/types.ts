@@ -559,6 +559,8 @@ export interface Screen {
   feedback?: Feedback[];
   /** 反馈池非空时自动写 */
   needs_revision?: boolean;
+  /** 原型图轨(界面轨视觉产物)出图队列标记 — 置位后进 codex 客户端 drain 会话的待出图队列, submit 回传后清除 */
+  needs_prototype?: boolean;
 }
 
 export interface ScreenSummary {

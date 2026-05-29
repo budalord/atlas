@@ -123,6 +123,28 @@ export function ScreenList({ productId, readOnly = false }: ScreenListProps) {
     }
   };
 
+  // 原型图轨: 把该屏标入出图队列(needs_prototype), 由 codex 客户端 drain 会话出图回传。
+  const requestPrototype = async () => {
+    if (!selected) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/products/${productId}/screens/${selected.module}/${selected.id}/request-prototype`,
+        { method: "POST" }
+      );
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(j.error ?? `HTTP ${res.status}`);
+      }
+      await loadDetail(selected.module, selected.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "请求原型图失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="grid min-h-0 grid-cols-[280px_1fr]">
       <aside className="border-r border-slate-200 bg-white">
@@ -200,7 +222,37 @@ export function ScreenList({ productId, readOnly = false }: ScreenListProps) {
                   承接 usecase: {detail.usecase_ids.join(" · ")}
                 </div>
               </div>
+              {!readOnly ? (
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  <button
+                    className="rounded bg-indigo-600 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+                    disabled={busy || detail.needs_prototype}
+                    onClick={() => void requestPrototype()}
+                    type="button"
+                  >
+                    {detail.preview_image ? "重新出图" : "请求原型图"}
+                  </button>
+                  {detail.needs_prototype ? (
+                    <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-800">
+                      待出图队列中 · 等 codex 客户端出图
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
             </header>
+
+            {/* 原型图(界面轨视觉产物)*/}
+            {detail.preview_image ? (
+              <section className="rounded-md border border-slate-200 bg-white px-4 py-3">
+                <div className="text-[10px] font-medium text-slate-500">原型图</div>
+                <img
+                  className="mt-2 max-h-[480px] w-auto rounded border border-slate-200"
+                  src={`/api/products/${productId}/screens/${detail.module}/${detail.id}/preview-image?v=${encodeURIComponent(detail.preview_image)}`}
+                  alt={`${detail.name} 原型图`}
+                />
+                <div className="mt-1 break-all text-[10px] text-slate-400">{detail.preview_image}</div>
+              </section>
+            ) : null}
 
             {/* validation issues */}
             {detail.validation_issues && detail.validation_issues.length > 0 ? (

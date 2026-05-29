@@ -35,6 +35,7 @@ interface ScreenFrontmatter {
   added_in_phase?: unknown;
   added_at?: unknown;
   needs_revision?: unknown;
+  needs_prototype?: unknown;
 }
 
 const VALID_ADDED_PHASES = new Set(["planning", "in-progress", "live"]);
@@ -150,6 +151,7 @@ export function parseScreen(
     : undefined;
 
   const needs_revision = fm.needs_revision === true;
+  const needs_prototype = fm.needs_prototype === true;
   const body = parsed.body.trim();
   const feedback = parseFeedbackSection(body);
 
@@ -164,6 +166,7 @@ export function parseScreen(
     ...(added_in_phase ? { added_in_phase } : {}),
     ...(added_at ? { added_at } : {}),
     ...(needs_revision ? { needs_revision } : {}),
+    ...(needs_prototype ? { needs_prototype } : {}),
     ...(feedback.length > 0 ? { feedback } : {}),
     body
   };
@@ -218,6 +221,7 @@ export async function writeScreen(productId: string, screen: Screen): Promise<vo
   if (screen.added_in_phase) fmObj.added_in_phase = screen.added_in_phase;
   if (screen.added_at) fmObj.added_at = screen.added_at;
   if (screen.needs_revision) fmObj.needs_revision = true;
+  if (screen.needs_prototype) fmObj.needs_prototype = true;
   const fmText = YAML.stringify(fmObj).trim();
   const body = screen.body.trim();
   const content = `---\n${fmText}\n---\n\n${body}\n`;

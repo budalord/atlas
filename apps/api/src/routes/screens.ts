@@ -1,5 +1,7 @@
+import path from "node:path";
 import { Request, Router } from "express";
 import type { Screen, ScreenEntityVisibility } from "@atlas/shared";
+import { dataPath } from "../services/fileReader";
 import {
   deleteScreen,
   findOrphanScreens,
@@ -10,6 +12,7 @@ import {
   validateScreen,
   writeScreen
 } from "../services/screenLoader";
+import { setNeedsPrototype } from "../services/prototypeQueue";
 import { bumpDataVersion, getDataVersion } from "../services/watcher";
 
 const ID_RE = /^[a-z][a-z0-9-]*$/;
@@ -59,6 +62,36 @@ screensRouter.get(
       }
       const validation_issues = await validateScreen(productId, screen);
       res.json({ data: { ...screen, validation_issues }, version: getDataVersion() });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * GET /:module/:screenId/preview-image — 直接返回该屏的原型图字节。
+ * 图片由 prototypeQueue.submitPrototype 复制进 screens/assets/ 并写入 screen.preview_image。
+ * 路径从存储的 preview_image 派生(非用户输入), 解析后强制校验仍在产品目录内, 防越界。
+ */
+screensRouter.get(
+  "/:module/:screenId/preview-image",
+  async (req: Request<{ id: string; module: string; screenId: string }>, res, next) => {
+    try {
+      const productId = req.params.id;
+      const screen = await loadScreen(productId, req.params.module, req.params.screenId);
+      if (!screen || !screen.preview_image) {
+        res.status(404).json({ error: "no preview image" });
+        return;
+      }
+      const productDir = dataPath("products", productId);
+      const abs = path.resolve(productDir, screen.preview_image);
+      if (abs !== productDir && !abs.startsWith(productDir + path.sep)) {
+        res.status(400).json({ error: "invalid preview path" });
+        return;
+      }
+      res.sendFile(abs, (err) => {
+        if (err && !res.headersSent) res.status(404).json({ error: "preview file missing" });
+      });
     } catch (error) {
       next(error);
     }
@@ -169,6 +202,33 @@ screensRouter.delete(
         `products/${productId}/modules/${req.params.module}/screens/${req.params.screenId}.md`
       );
       res.json({ data: { deleted: req.params.screenId }, version: getDataVersion() });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * POST /:module/:screenId/request-prototype — 把屏标入原型图出图队列 (needs_prototype)。
+ * 见 prototypeQueue.ts / memory: codex-prototype-image-track。
+ */
+screensRouter.post(
+  "/:module/:screenId/request-prototype",
+  async (req: Request<{ id: string; module: string; screenId: string }>, res, next) => {
+    try {
+      const productId = req.params.id;
+      const ok = await setNeedsPrototype(productId, req.params.module, req.params.screenId);
+      if (!ok) {
+        res.status(404).json({ error: `screen not found` });
+        return;
+      }
+      bumpDataVersion(
+        `products/${productId}/modules/${req.params.module}/screens/${req.params.screenId}.md`
+      );
+      res.json({
+        data: { screenId: req.params.screenId, needs_prototype: true },
+        version: getDataVersion()
+      });
     } catch (error) {
       next(error);
     }
