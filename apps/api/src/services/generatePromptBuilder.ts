@@ -10,6 +10,7 @@ import { loadActors } from "./actorLoader";
 import { loadCapabilities, attachCapabilityRefs } from "./capabilityLoader";
 import { loadUseCases } from "./usecaseLoader";
 import { AGENT_SELF_DECISION_PRINCIPLE, DECISION_MAKER_VIEW_GUIDE } from "./revisePromptBuilder";
+import { buildDomainContext } from "./domainContext";
 
 export interface FeatureGenerateStats {
   has_description: boolean;
@@ -70,10 +71,11 @@ async function collectStats(productId: string): Promise<FeatureGenerateStats> {
   };
 }
 
-function header(productMeta: ProductMeta | null, productId: string, stage: string): string {
+async function header(productMeta: ProductMeta | null, productId: string, stage: string): Promise<string> {
   const today = new Date().toISOString().slice(0, 10);
   const productLine = productMeta ? `${productMeta.name} (${productId})` : productId;
   const workdir = path.join(atlasRoot, "data", "products", productId);
+  const domain = await buildDomainContext(productMeta, productId);
   return [
     `# Atlas ${stage}生成任务`,
     "",
@@ -82,6 +84,8 @@ function header(productMeta: ProductMeta | null, productId: string, stage: strin
     `- 工作目录: ${workdir}/`,
     `- 当前时间: ${today}`,
     `- 阶段: ${stage}(从零生成)`,
+    "",
+    domain,
     ""
   ].join("\n");
 }
@@ -120,7 +124,7 @@ export async function buildFeatureGeneratePrompt(productId: string): Promise<Gen
       : "";
 
   const parts = [
-    header(meta, productId, "功能与用例"),
+    await header(meta, productId, "功能与用例"),
     `## 你的任务
 你是 Atlas 的大 Agent。基于产品描述,生成 Atlas **五层骨架**的功能与用例骨架,**严格遵守 feature-source-contract + capability-contract + usecase-contract + actor-contract**。
 
@@ -313,7 +317,7 @@ export async function buildEntityGeneratePrompt(productId: string): Promise<Gene
       : "";
 
   const parts = [
-    header(meta, productId, "实体"),
+    await header(meta, productId, "实体"),
     `## 你的任务
 你是 Atlas 的实体 Agent。基于产品的全部 **features**,识别出业务**实体**(Entity),
 为每个实体生成 entity md 文件。
@@ -389,7 +393,7 @@ export async function buildConventionsGeneratePrompt(productId: string): Promise
     : "";
 
   const parts = [
-    header(meta, productId, "L0 规范"),
+    await header(meta, productId, "L0 规范"),
     `## 你的任务
 你是 Atlas 的规范 Agent。基于现有 **features + entities**,识别出该产品级别的**规范约束**(L0),
 生成 \`CONVENTIONS.md\`。L0 是 Agent 在 L1(实体)/ L2(功能点)操作时必须遵循的硬约束基线。
@@ -562,7 +566,7 @@ ${statesLine}`
   const today = new Date().toISOString();
 
   const parts = [
-    header(meta, productId, "Path C 实体派生"),
+    await header(meta, productId, "Path C 实体派生"),
     AGENT_SELF_DECISION_PRINCIPLE,
     "",
     `## 你的任务
@@ -784,7 +788,7 @@ export async function buildScreenGeneratePrompt(productId: string): Promise<Gene
   const workdir = path.join(atlasRoot, "data", "products", productId);
 
   const prompt = [
-    header(meta, productId, "界面屏 Screen"),
+    await header(meta, productId, "界面屏 Screen"),
     AGENT_SELF_DECISION_PRINCIPLE,
     "",
     `## 你的任务
@@ -974,7 +978,7 @@ export async function buildUseCaseGeneratePrompt(productId: string): Promise<Gen
   }
 
   const prompt = [
-    header(meta, productId, "业务用例 UseCase"),
+    await header(meta, productId, "业务用例 UseCase"),
     AGENT_SELF_DECISION_PRINCIPLE,
     "",
     `## 你的任务

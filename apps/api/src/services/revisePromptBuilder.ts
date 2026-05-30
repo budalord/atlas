@@ -6,6 +6,7 @@ import { loadEntities, loadModules, loadFeatures } from "./entityLoader";
 import { loadUseCases } from "./usecaseLoader";
 import { loadScreens } from "./screenLoader";
 import { parseGlobalFeedbackFile } from "./globalFeedbackParser";
+import { buildDomainContext } from "./domainContext";
 
 export interface FeaturePromptStats {
   features_with_revision: number;
@@ -55,10 +56,15 @@ async function loadMeta(productId: string): Promise<ProductMeta | null> {
   }
 }
 
-function header(productMeta: ProductMeta | null, productId: string, scopeLabel: string): string {
+async function header(
+  productMeta: ProductMeta | null,
+  productId: string,
+  scopeLabel: string
+): Promise<string> {
   const today = new Date().toISOString().slice(0, 10);
   const productLine = productMeta ? `${productMeta.name} (${productId})` : productId;
   const workdir = path.join(atlasRoot, "data", "products", productId);
+  const domain = await buildDomainContext(productMeta, productId);
   return [
     `# Atlas ${scopeLabel}修订任务`,
     "",
@@ -66,6 +72,8 @@ function header(productMeta: ProductMeta | null, productId: string, scopeLabel: 
     `- 产品: ${productLine}`,
     `- 工作目录: ${workdir}/`,
     `- 当前时间: ${today}`,
+    "",
+    domain,
     ""
   ].join("\n");
 }
@@ -615,7 +623,7 @@ export async function buildFeatureRevisePrompt(productId: string): Promise<Revis
   const global = await parseGlobalFeedbackFile(productId);
 
   const parts: string[] = [
-    header(meta, productId, "功能点"),
+    await header(meta, productId, "功能点"),
     FEATURE_TASK,
     "## 待处理的 feature 反馈",
     "",
@@ -653,7 +661,7 @@ export async function buildEntityRevisePrompt(productId: string): Promise<Revise
   const global = await parseGlobalFeedbackFile(productId);
 
   const parts: string[] = [
-    header(meta, productId, "实体"),
+    await header(meta, productId, "实体"),
     ENTITY_TASK,
     "## 待处理的 entity 反馈",
     "",
@@ -692,7 +700,7 @@ export async function buildUseCaseRevisePrompt(productId: string): Promise<Revis
   }
 
   const parts: string[] = [
-    header(meta, productId, "用例"),
+    await header(meta, productId, "用例"),
     USECASE_TASK,
     "## 待处理的 usecase 反馈",
     "",
@@ -729,7 +737,7 @@ export async function buildScreenRevisePrompt(productId: string): Promise<Revise
   }
 
   const parts: string[] = [
-    header(meta, productId, "界面屏"),
+    await header(meta, productId, "界面屏"),
     SCREEN_TASK,
     "## 待处理的 screen 反馈",
     "",
@@ -751,7 +759,7 @@ export async function buildPrototypeRevisePrompt(productId: string): Promise<Rev
   const global = await parseGlobalFeedbackFile(productId);
 
   const placeholder = [
-    header(meta, productId, "原型"),
+    await header(meta, productId, "原型"),
     "## 占位提示词",
     "原型阶段提示词模板将在后续轮次定义,当前占位。",
     "",
@@ -777,7 +785,7 @@ export async function buildActorRevisePrompt(productId: string): Promise<ReviseR
   const global = await parseGlobalFeedbackFile(productId);
 
   const text = [
-    header(meta, productId, "Actor"),
+    await header(meta, productId, "Actor"),
     ACTOR_TASK,
     "",
     "## 当前 actors 池",
