@@ -36,6 +36,7 @@ interface ScreenFrontmatter {
   added_at?: unknown;
   needs_revision?: unknown;
   needs_prototype?: unknown;
+  pending_prototype?: unknown;
 }
 
 const VALID_ADDED_PHASES = new Set(["planning", "in-progress", "live"]);
@@ -141,6 +142,9 @@ export function parseScreen(
   const preview_image = typeof fm.preview_image === "string" && fm.preview_image.trim().length > 0
     ? fm.preview_image.trim()
     : undefined;
+  const pending_prototype = typeof fm.pending_prototype === "string" && fm.pending_prototype.trim().length > 0
+    ? fm.pending_prototype.trim()
+    : undefined;
 
   const addedPhaseRaw = typeof fm.added_in_phase === "string" ? fm.added_in_phase.trim() : "";
   const added_in_phase = addedPhaseRaw && VALID_ADDED_PHASES.has(addedPhaseRaw)
@@ -163,6 +167,7 @@ export function parseScreen(
     entity_visibility,
     ...(prototype_url ? { prototype_url } : {}),
     ...(preview_image ? { preview_image } : {}),
+    ...(pending_prototype ? { pending_prototype } : {}),
     ...(added_in_phase ? { added_in_phase } : {}),
     ...(added_at ? { added_at } : {}),
     ...(needs_revision ? { needs_revision } : {}),
@@ -218,6 +223,7 @@ export async function writeScreen(productId: string, screen: Screen): Promise<vo
   };
   if (screen.prototype_url) fmObj.prototype_url = screen.prototype_url;
   if (screen.preview_image) fmObj.preview_image = screen.preview_image;
+  if (screen.pending_prototype) fmObj.pending_prototype = screen.pending_prototype;
   if (screen.added_in_phase) fmObj.added_in_phase = screen.added_in_phase;
   if (screen.added_at) fmObj.added_at = screen.added_at;
   if (screen.needs_revision) fmObj.needs_revision = true;

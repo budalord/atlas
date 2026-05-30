@@ -260,7 +260,8 @@ agentApiRouter.post("/propose/:scope", async (req: Request<{ scope: string }>, r
 // ============================================================
 // 原型图轨 (双轨设计 · 界面轨视觉产物) — codex 客户端 drain 会话用
 //   GET  /prototypes/pending?productId=   → 待出图队列 (needs_prototype=true 的 screen)
-//   POST /prototypes/submit               → 回传原型图, 写 preview_image + 清 flag
+//   POST /prototypes/submit               → 回传原型图, 写【暂存待审】pending_prototype + 清 flag
+//                                           (不直接生效;PM 审核通过才升为 preview_image)
 // 屏规格直接复用 GET /screen/:productId/:screenId。
 // 背景见 memory: codex-prototype-image-track。一屏一闭环: 出一张立刻 submit 再出下一张。
 // ============================================================

@@ -12,7 +12,14 @@ import {
   validateScreen,
   writeScreen
 } from "../services/screenLoader";
-import { setNeedsPrototype } from "../services/prototypeQueue";
+import {
+  approvePrototype,
+  listPendingReview,
+  PrototypeError,
+  queueAllMissing,
+  rejectPrototype,
+  setNeedsPrototype
+} from "../services/prototypeQueue";
 import { bumpDataVersion, getDataVersion } from "../services/watcher";
 
 const ID_RE = /^[a-z][a-z0-9-]*$/;
@@ -44,6 +51,27 @@ screensRouter.get("/orphans", async (req: Request<{ id: string }>, res, next) =>
   try {
     const issues = await findOrphanScreens(req.params.id);
     res.json({ data: issues, version: getDataVersion() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** GET /prototype-review — 原型图审核 inbox(有 pending_prototype 的 screen) */
+screensRouter.get("/prototype-review", async (req: Request<{ id: string }>, res, next) => {
+  try {
+    const data = await listPendingReview(req.params.id);
+    res.json({ data, version: getDataVersion() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** POST /queue-all-missing — 爆发期: 把所有无图/未入队的 screen 批量入队出图 */
+screensRouter.post("/queue-all-missing", async (req: Request<{ id: string }>, res, next) => {
+  try {
+    const queued = await queueAllMissing(req.params.id);
+    if (queued.length > 0) bumpDataVersion(`products/${req.params.id}/screens:queue-all`);
+    res.json({ data: { queued, count: queued.length }, version: getDataVersion() });
   } catch (error) {
     next(error);
   }
@@ -230,6 +258,81 @@ screensRouter.post(
         version: getDataVersion()
       });
     } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * GET /:module/:screenId/pending-image — 返回该屏【待审暂存】原型图字节(审核时看)。
+ * 路径从存储的 pending_prototype 派生 + 越界校验, 同 preview-image。
+ */
+screensRouter.get(
+  "/:module/:screenId/pending-image",
+  async (req: Request<{ id: string; module: string; screenId: string }>, res, next) => {
+    try {
+      const productId = req.params.id;
+      const screen = await loadScreen(productId, req.params.module, req.params.screenId);
+      if (!screen || !screen.pending_prototype) {
+        res.status(404).json({ error: "no pending prototype" });
+        return;
+      }
+      const productDir = dataPath("products", productId);
+      const abs = path.resolve(productDir, screen.pending_prototype);
+      if (abs !== productDir && !abs.startsWith(productDir + path.sep)) {
+        res.status(400).json({ error: "invalid pending path" });
+        return;
+      }
+      res.sendFile(abs, (err) => {
+        if (err && !res.headersSent) res.status(404).json({ error: "pending file missing" });
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/** POST /:module/:screenId/approve-prototype — 审核通过: 暂存图升为 preview_image */
+screensRouter.post(
+  "/:module/:screenId/approve-prototype",
+  async (req: Request<{ id: string; module: string; screenId: string }>, res, next) => {
+    try {
+      const productId = req.params.id;
+      const result = await approvePrototype(productId, req.params.module, req.params.screenId);
+      bumpDataVersion(
+        `products/${productId}/modules/${req.params.module}/screens/${req.params.screenId}.md`
+      );
+      res.json({ data: result, version: getDataVersion() });
+    } catch (error) {
+      if (error instanceof PrototypeError) {
+        res.status(error.httpStatus).json({ error: error.message });
+        return;
+      }
+      next(error);
+    }
+  }
+);
+
+/**
+ * POST /:module/:screenId/reject-prototype — 审核打回: 丢弃暂存图。
+ * body.requeue(默认 true)= 是否重新入队让 automation 再出一版。
+ */
+screensRouter.post(
+  "/:module/:screenId/reject-prototype",
+  async (req: Request<{ id: string; module: string; screenId: string }>, res, next) => {
+    try {
+      const productId = req.params.id;
+      const requeue = req.body?.requeue !== false; // 默认重新入队
+      const result = await rejectPrototype(productId, req.params.module, req.params.screenId, requeue);
+      bumpDataVersion(
+        `products/${productId}/modules/${req.params.module}/screens/${req.params.screenId}.md`
+      );
+      res.json({ data: result, version: getDataVersion() });
+    } catch (error) {
+      if (error instanceof PrototypeError) {
+        res.status(error.httpStatus).json({ error: error.message });
+        return;
+      }
       next(error);
     }
   }

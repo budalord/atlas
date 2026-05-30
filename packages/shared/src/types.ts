@@ -561,6 +561,8 @@ export interface Screen {
   needs_revision?: boolean;
   /** 原型图轨(界面轨视觉产物)出图队列标记 — 置位后进 codex 客户端 drain 会话的待出图队列, submit 回传后清除 */
   needs_prototype?: boolean;
+  /** 暂存待审的原型图相对路径 — submit 回传写此处(非 preview_image), 审核通过才升为 preview_image, 打回则丢弃 */
+  pending_prototype?: string;
 }
 
 export interface ScreenSummary {

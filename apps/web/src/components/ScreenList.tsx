@@ -9,6 +9,7 @@ interface ScreenListProps {
 }
 
 type DetailedScreen = Screen & { validation_issues?: ScreenValidationIssue[] };
+type ScreenRow = ScreenSummary & { needs_prototype?: boolean; pending_prototype?: string };
 
 /**
  * 双轨设计 · Screen 子视图(v0.1)。
@@ -19,7 +20,7 @@ type DetailedScreen = Screen & { validation_issues?: ScreenValidationIssue[] };
  * 不在此处做 inline 编辑(v0.1 范围: agent 写盘, UI 只读 + 反馈)。
  */
 export function ScreenList({ productId, readOnly = false }: ScreenListProps) {
-  const [list, setList] = useState<ScreenSummary[]>([]);
+  const [list, setList] = useState<ScreenRow[]>([]);
   const [selected, setSelected] = useState<{ module: string; id: string } | null>(null);
   const [detail, setDetail] = useState<DetailedScreen | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -31,12 +32,14 @@ export function ScreenList({ productId, readOnly = false }: ScreenListProps) {
       const res = await fetch(`/api/products/${productId}/screens`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = (await res.json()) as ApiEnvelope<Screen[]>;
-      const summaries: ScreenSummary[] = json.data.map((s) => ({
+      const summaries: ScreenRow[] = json.data.map((s) => ({
         id: s.id,
         name: s.name,
         module: s.module,
         usecase_ids: s.usecase_ids,
-        needs_revision: s.needs_revision
+        needs_revision: s.needs_revision,
+        needs_prototype: s.needs_prototype,
+        pending_prototype: s.pending_prototype
       }));
       setList(summaries);
       setError(null);
@@ -82,7 +85,7 @@ export function ScreenList({ productId, readOnly = false }: ScreenListProps) {
   });
 
   const grouped = useMemo(() => {
-    const map = new Map<string, ScreenSummary[]>();
+    const map = new Map<string, ScreenRow[]>();
     for (const s of list) {
       const arr = map.get(s.module) ?? [];
       arr.push(s);
@@ -145,6 +148,52 @@ export function ScreenList({ productId, readOnly = false }: ScreenListProps) {
     }
   };
 
+  // 审核闸: 通过(暂存图升为 preview_image)/ 打回(丢弃暂存图, 默认重新入队再出)
+  const reviewPrototype = async (action: "approve" | "reject") => {
+    if (!selected) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/products/${productId}/screens/${selected.module}/${selected.id}/${action}-prototype`,
+        action === "reject"
+          ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ requeue: true }) }
+          : { method: "POST" }
+      );
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(j.error ?? `HTTP ${res.status}`);
+      }
+      await loadDetail(selected.module, selected.id);
+      await loadList();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "审核操作失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // 爆发期: 把所有无图/未入队的屏批量入队出图
+  const queueAllMissing = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/products/${productId}/screens/queue-all-missing`, { method: "POST" });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(j.error ?? `HTTP ${res.status}`);
+      }
+      const json = (await res.json()) as ApiEnvelope<{ count: number }>;
+      await loadList();
+      if (selected) await loadDetail(selected.module, selected.id);
+      setError(json.data.count === 0 ? "没有需要入队的屏(都已有图或在队列中)" : null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "批量入队失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="grid min-h-0 grid-cols-[280px_1fr]">
       <aside className="border-r border-slate-200 bg-white">
@@ -153,6 +202,21 @@ export function ScreenList({ productId, readOnly = false }: ScreenListProps) {
           <div className="mt-0.5 text-[10px] text-slate-400">
             共 {list.length} 个 · 按 module 分组
           </div>
+          {list.some((r) => r.pending_prototype) ? (
+            <div className="mt-0.5 text-[10px] font-medium text-violet-600">
+              待审原型 {list.filter((r) => r.pending_prototype).length}
+            </div>
+          ) : null}
+          {!readOnly ? (
+            <button
+              className="mt-1.5 w-full rounded bg-indigo-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+              disabled={busy}
+              onClick={() => void queueAllMissing()}
+              type="button"
+            >
+              批量为无图屏出图
+            </button>
+          ) : null}
         </div>
         {grouped.length === 0 ? (
           <div className="px-4 py-6 text-xs text-slate-400">
@@ -180,15 +244,34 @@ export function ScreenList({ productId, readOnly = false }: ScreenListProps) {
                           type="button"
                         >
                           <span className="truncate">{s.name}</span>
-                          {s.needs_revision ? (
-                            <span
-                              className={`shrink-0 rounded px-1 text-[10px] ${
-                                active ? "bg-amber-300 text-amber-900" : "bg-amber-100 text-amber-800"
-                              }`}
-                            >
-                              !
-                            </span>
-                          ) : null}
+                          <span className="flex shrink-0 items-center gap-1">
+                            {s.pending_prototype ? (
+                              <span
+                                className={`rounded px-1 text-[10px] ${
+                                  active ? "bg-violet-300 text-violet-900" : "bg-violet-100 text-violet-800"
+                                }`}
+                              >
+                                审
+                              </span>
+                            ) : s.needs_prototype ? (
+                              <span
+                                className={`rounded px-1 text-[10px] ${
+                                  active ? "bg-sky-300 text-sky-900" : "bg-sky-100 text-sky-800"
+                                }`}
+                              >
+                                图
+                              </span>
+                            ) : null}
+                            {s.needs_revision ? (
+                              <span
+                                className={`rounded px-1 text-[10px] ${
+                                  active ? "bg-amber-300 text-amber-900" : "bg-amber-100 text-amber-800"
+                                }`}
+                              >
+                                !
+                              </span>
+                            ) : null}
+                          </span>
                         </button>
                       </li>
                     );
@@ -226,7 +309,7 @@ export function ScreenList({ productId, readOnly = false }: ScreenListProps) {
                 <div className="flex shrink-0 flex-col items-end gap-1">
                   <button
                     className="rounded bg-indigo-600 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-                    disabled={busy || detail.needs_prototype}
+                    disabled={busy || detail.needs_prototype || !!detail.pending_prototype}
                     onClick={() => void requestPrototype()}
                     type="button"
                   >
@@ -236,15 +319,58 @@ export function ScreenList({ productId, readOnly = false }: ScreenListProps) {
                     <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-800">
                       待出图队列中 · 等 codex 客户端出图
                     </span>
+                  ) : detail.pending_prototype ? (
+                    <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] text-violet-800">
+                      待审核
+                    </span>
                   ) : null}
                 </div>
               ) : null}
             </header>
 
-            {/* 原型图(界面轨视觉产物)*/}
+            {/* 待审暂存图 — 审核闸: 通过才升为 preview_image */}
+            {detail.pending_prototype ? (
+              <section className="rounded-md border border-violet-300 bg-violet-50/40 px-4 py-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[11px] font-semibold text-violet-800">
+                    待审核原型图 — codex 刚出,通过才生效
+                  </div>
+                  {!readOnly ? (
+                    <div className="flex gap-2">
+                      <button
+                        className="rounded bg-emerald-600 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+                        disabled={busy}
+                        onClick={() => void reviewPrototype("approve")}
+                        type="button"
+                      >
+                        通过
+                      </button>
+                      <button
+                        className="rounded bg-rose-600 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-rose-500 disabled:opacity-50"
+                        disabled={busy}
+                        onClick={() => void reviewPrototype("reject")}
+                        type="button"
+                      >
+                        打回重出
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+                <img
+                  className="mt-2 max-h-[480px] w-auto rounded border border-violet-200"
+                  src={`/api/products/${productId}/screens/${detail.module}/${detail.id}/pending-image?v=${encodeURIComponent(detail.pending_prototype)}`}
+                  alt={`${detail.name} 待审原型图`}
+                />
+                <div className="mt-1 break-all text-[10px] text-slate-400">{detail.pending_prototype}</div>
+              </section>
+            ) : null}
+
+            {/* 已通过的原型图 */}
             {detail.preview_image ? (
               <section className="rounded-md border border-slate-200 bg-white px-4 py-3">
-                <div className="text-[10px] font-medium text-slate-500">原型图</div>
+                <div className="text-[10px] font-medium text-slate-500">
+                  {detail.pending_prototype ? "当前已通过(通过上面的新图后将被替换)" : "原型图(已通过)"}
+                </div>
                 <img
                   className="mt-2 max-h-[480px] w-auto rounded border border-slate-200"
                   src={`/api/products/${productId}/screens/${detail.module}/${detail.id}/preview-image?v=${encodeURIComponent(detail.preview_image)}`}
