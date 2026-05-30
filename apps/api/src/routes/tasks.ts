@@ -94,7 +94,7 @@ tasksRouter.get("/:tid/changeset", (req: TaskReq, res) => {
 tasksRouter.post("/:tid/approve", async (req: TaskReq, res, next) => {
   try {
     const result = await approveTask(req.params.tid);
-    if ("error" in result) {
+    if ("error" in result && !("id" in result)) {
       res.status(400).json({ error: result.error });
       return;
     }
@@ -107,7 +107,7 @@ tasksRouter.post("/:tid/approve", async (req: TaskReq, res, next) => {
 tasksRouter.post("/:tid/reject", async (req: TaskReq, res, next) => {
   try {
     const result = await rejectTask(req.params.tid);
-    if ("error" in result) {
+    if ("error" in result && !("id" in result)) {
       res.status(400).json({ error: result.error });
       return;
     }
@@ -120,7 +120,7 @@ tasksRouter.post("/:tid/reject", async (req: TaskReq, res, next) => {
 tasksRouter.delete("/:tid", async (req: TaskReq, res, next) => {
   try {
     const result = await deleteTask(req.params.tid);
-    if ("error" in result) {
+    if ("error" in result && !("id" in result)) {
       res.status(404).json({ error: result.error });
       return;
     }
@@ -134,7 +134,7 @@ tasksRouter.post("/:tid/retry", async (req: TaskReq, res, next) => {
   try {
     const extra = typeof req.body?.extra === "string" ? req.body.extra : undefined;
     const result = await retryTask(req.params.tid, extra);
-    if ("error" in result) {
+    if ("error" in result && !("id" in result)) {
       res.status(400).json({ error: result.error });
       return;
     }
@@ -151,7 +151,7 @@ tasksRouter.post("/:tid/changeset/:idx/accept", (req: ChangesetFileReq, res) => 
     return;
   }
   const result = acceptChangesetFile(req.params.tid, idx);
-  if ("error" in result) {
+  if ("error" in result && !("id" in result)) {
     res.status(400).json({ error: result.error });
     return;
   }
@@ -166,7 +166,7 @@ tasksRouter.post("/:tid/changeset/:idx/reject", async (req: ChangesetFileReq, re
       return;
     }
     const result = await rejectChangesetFile(req.params.tid, idx);
-    if ("error" in result) {
+    if ("error" in result && !("id" in result)) {
       res.status(400).json({ error: result.error });
       return;
     }
