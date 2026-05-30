@@ -43,8 +43,6 @@ export type {
   ScreenReviseTask,
   ChangedFile,
   ChangeFileSummary,
-  DesignDoc,
-  DesignSummary,
   // 批次 1' · 反馈池(精简后只剩 id/date/content)
   Feedback,
   // 批次 3' · 全局需求池

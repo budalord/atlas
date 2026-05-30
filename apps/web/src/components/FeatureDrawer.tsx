@@ -21,8 +21,6 @@ interface FeatureDrawerProps {
   readOnly?: boolean;
   /** 当前产品 phase,banner 文案用 */
   productPhase?: string;
-  /** 点「📄 设计页」时切到 design tab 并定位文件 */
-  onOpenDesign?: (name: string) => void;
 }
 
 const COLOR_CHIP: Record<ModuleColor, string> = {
@@ -50,8 +48,7 @@ export function FeatureDrawer({
   featureId,
   onClose,
   readOnly = false,
-  productPhase,
-  onOpenDesign
+  productPhase
 }: FeatureDrawerProps) {
   const [issueOpen, setIssueOpen] = useState(false);
   const [bundle, setBundle] = useState<FeatureBundle | null>(null);
@@ -276,17 +273,6 @@ export function FeatureDrawer({
                 type="button"
               >
                 💬
-              </button>
-            ) : null}
-            {bundle?.feature && onOpenDesign ? (
-              <button
-                aria-label="查看/创建设计页"
-                className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-                onClick={() => onOpenDesign(bundle.feature.id)}
-                title="跳到该 feature 的设计页"
-                type="button"
-              >
-                📄
               </button>
             ) : null}
             {!readOnly ? (

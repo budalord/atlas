@@ -31,7 +31,6 @@ interface ProductDetailProps {
 export function ProductDetail({ product }: ProductDetailProps) {
   const [tab, setTab] = useState<TabKey>("features");
   const [openFeatureId, setOpenFeatureId] = useState<string | null>(null);
-  const [openDesignName, setOpenDesignName] = useState<string | null>(null);
   const consumeFeatureOpen = useUiStore((s) => s.consumeFeatureOpen);
   const pendingFeatureOpen = useUiStore((s) => s.pendingFeatureOpen);
 
@@ -155,25 +154,12 @@ export function ProductDetail({ product }: ProductDetailProps) {
         <ConventionsTab productId={product.id} readOnly={readOnly} />
       ) : null}
       {tab === "design" ? (
-        <DesignTab
-          onOpenDesign={(name) => {
-            setTab("design");
-            setOpenDesignName(name);
-          }}
-          openName={openDesignName}
-          productId={product.id}
-          readOnly={readOnly}
-        />
+        <DesignTab productId={product.id} readOnly={readOnly} />
       ) : null}
 
       <FeatureDrawer
         featureId={openFeatureId}
         onClose={() => setOpenFeatureId(null)}
-        onOpenDesign={(name) => {
-          setOpenFeatureId(null);
-          setTab("design");
-          setOpenDesignName(name);
-        }}
         productId={product.id}
         productPhase={phase}
         readOnly={readOnly}

@@ -669,17 +669,6 @@ export interface RolesRegistry {
 
 // v0.1 rev3: 流程图 (Flowchart*) 全部类型已删 — 流程图功能在该版本被砍
 
-/** 设计文档:每个 feature 1:1 对应一个 markdown 文件 */
-export interface DesignSummary {
-  name: string;
-  last_modified: string | null;
-}
-
-export interface DesignDoc {
-  name: string;
-  body: string;
-  last_modified: string | null;
-}
 
 /** 功能点列表卡片用,只含轻量字段 */
 export interface FeaturePointPreview {
