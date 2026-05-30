@@ -37,6 +37,7 @@ import {
   buildConventionsGeneratePrompt
 } from "./generatePromptBuilder";
 import { restoreFromBackups, clearBackups } from "./changesetTracker";
+import { flagRevisedScreensForReprototype } from "./prototypeQueue";
 import { dataPath } from "./fileReader";
 import { appendTaskHistory, buildHistoryRecord } from "./taskHistory";
 
@@ -526,6 +527,12 @@ export async function approveTask(taskId: string): Promise<Task | { error: strin
   } else {
     // batch kinds: 文件已被 agent workspace-write 落盘, approve = 清 backup
     await clearBackups(t.payload.productDir, t.id).catch(() => undefined);
+    // 联动: 规格被改且已有原型图的屏, 自动入队重出(旧图按旧规格画的, 已过时)
+    const reflagged = await flagRevisedScreensForReprototype(
+      t.payload.productId,
+      t.changedFiles ?? []
+    ).catch(() => [] as string[]);
+    if (reflagged.length > 0) bumpDataVersion(`task:${t.id}:reprototype`);
   }
 
   setStage(t, "completed", { finishedAt: new Date().toISOString() });

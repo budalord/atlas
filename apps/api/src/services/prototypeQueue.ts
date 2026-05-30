@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { dataPath } from "./fileReader";
-import { loadScreens, screenFilePath } from "./screenLoader";
+import { loadScreen, loadScreens, screenFilePath } from "./screenLoader";
 
 /**
  * 原型图轨(双轨设计 · 界面轨视觉产物)出图队列 + 审核闸。
@@ -249,4 +249,34 @@ export async function rejectPrototype(
   const abs = resolveInProduct(productId, pending);
   if (abs) await fs.rm(abs, { force: true }).catch(() => {});
   return { requeued: requeue };
+}
+
+/**
+ * 联动: 规格被改的屏若已有原型图(preview_image), 自动入队重出 —
+ * 图是按旧规格画的, 规格一变图就过时。 由 screen-revise 等 batch 任务 approve 时调用。
+ *
+ * 只处理:① 未被单文件打回的 ② modules/<m>/screens/<id>.md(排除 assets)
+ *        ③ 已有 preview_image ④ 尚未在队列 / 尚无待审。
+ * 返回被新入队的 "module/screenId" 列表。
+ */
+export async function flagRevisedScreensForReprototype(
+  productId: string,
+  changedFiles: Array<{ path: string; reviewState?: string }>
+): Promise<string[]> {
+  const flagged: string[] = [];
+  const seen = new Set<string>();
+  for (const f of changedFiles) {
+    if (f.reviewState === "rejected") continue;
+    const m = f.path.match(/^modules\/([^/]+)\/screens\/([^/]+)\.md$/);
+    if (!m) continue;
+    const [, moduleName, screenId] = m;
+    const key = `${moduleName}/${screenId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const screen = await loadScreen(productId, moduleName, screenId);
+    if (!screen || !screen.preview_image) continue; // 没图 → 无需重出
+    if (screen.needs_prototype || screen.pending_prototype) continue; // 已在队 / 已待审 → 跳过
+    if (await setNeedsPrototype(productId, moduleName, screenId)) flagged.push(key);
+  }
+  return flagged;
 }
