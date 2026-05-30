@@ -7,7 +7,6 @@ import type {
   EntityQuestion
 } from "../../types";
 import { useDataChange } from "../../lib/useDataChange";
-import { GlobalFeedbackPanel } from "../GlobalFeedbackPanel";
 import { MarkdownRenderer } from "../MarkdownRenderer";
 import { AgentTaskTriggers } from "../AgentTaskTriggers";
 
@@ -100,8 +99,6 @@ export function EntityTab({ productId, readOnly = false }: EntityTabProps) {
         entityCount={entities.length}
         pendingBusinessCount={pendingBusinessCount}
       />
-
-      <GlobalFeedbackPanel productId={productId} scope="entity" />
 
       <ToolBar entitiesData={entitiesData} />
 

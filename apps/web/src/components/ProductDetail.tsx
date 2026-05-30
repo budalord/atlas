@@ -6,6 +6,7 @@ import { useDataChange } from "../lib/useDataChange";
 import type { ApiEnvelope, ModuleWithFeatures, Product, ProductVision } from "../types";
 import { AdditionalDocsPanel } from "./AdditionalDocsPanel";
 import { AgentTasksPanel } from "./AgentTasksPanel";
+import { ProductFlowOverview } from "./ProductFlowOverview";
 import { RecentActivityStrip } from "./RecentActivityStrip";
 import { CommitList } from "./CommitList";
 import { FeatureTable } from "./FeatureTable";
@@ -29,7 +30,7 @@ interface ProductDetailProps {
 }
 
 export function ProductDetail({ product }: ProductDetailProps) {
-  const [tab, setTab] = useState<TabKey>("features");
+  const [tab, setTab] = useState<TabKey>("flow");
   const [openFeatureId, setOpenFeatureId] = useState<string | null>(null);
   const consumeFeatureOpen = useUiStore((s) => s.consumeFeatureOpen);
   const pendingFeatureOpen = useUiStore((s) => s.pendingFeatureOpen);
@@ -142,6 +143,9 @@ export function ProductDetail({ product }: ProductDetailProps) {
         })}
       </nav>
 
+      {tab === "flow" ? (
+        <ProductFlowOverview productId={product.id} readOnly={readOnly} onDrill={setTab} />
+      ) : null}
       {tab === "features" ? (
         <FeatureTab productId={product.id} readOnly={readOnly} />
       ) : null}

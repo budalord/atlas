@@ -22,6 +22,8 @@ interface FeatureTabProps {
   /** 老接口保留:批次 2' markmap 不会主动调,但 ProductDetail 仍传 */
   onOpenFeature?: (moduleId: string, featureId: string) => void;
   readOnly?: boolean;
+  /** 嵌入「依赖流总览」入口①时:填满父容器高度 + 去掉 banner/反馈/触发/统计行,只留 markmap。 */
+  embedded?: boolean;
 }
 
 interface FeatureRef {
@@ -53,7 +55,7 @@ interface HoveredFeature {
  */
 // 视图切换 (markmap / flowchart) 在 v0.1 rev3 后简化为单视图 — markmap
 
-export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
+export function FeatureTab({ productId, readOnly = false, embedded = false }: FeatureTabProps) {
   const [data, setData] = useState<ModuleWithFeatures[] | null>(null);
   const [capabilities, setCapabilities] = useState<CapabilityWithRefs[]>([]);
   const [usecases, setUsecases] = useState<UseCase[]>([]);
@@ -362,34 +364,38 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
   }
 
   return (
-    <div className="flex h-[calc(100vh-140px)] flex-col">
+    <div className={embedded ? "flex h-full flex-col" : "flex h-[calc(100vh-140px)] flex-col"}>
       <div className="flex min-h-0 flex-1 flex-col">
-        <FeatureOverlapBanner productId={productId} readOnly={readOnly} />
-        <GlobalFeedbackPanel productId={productId} scope="feature" />
-        {!readOnly ? (
-          <AgentTaskTriggers
-            className="px-5 pt-3"
-            productId={productId}
-            triggers={[
-              {
-                // 一次过:按反馈修订功能 → 修订用例 → 给无用例的功能补用例(三个 agent 串行排队)
-                label: "更新功能与用例",
-                kinds: ["feature-revise", "usecase-revise", "usecase-generate"]
-              }
-            ]}
-          />
+        {!embedded ? (
+          <>
+            <FeatureOverlapBanner productId={productId} readOnly={readOnly} />
+            <GlobalFeedbackPanel productId={productId} scope="feature" />
+            {!readOnly ? (
+              <AgentTaskTriggers
+                className="px-5 pt-3"
+                productId={productId}
+                triggers={[
+                  {
+                    // 一次过:按反馈修订功能 → 修订用例 → 给无用例的功能补用例(三个 agent 串行排队)
+                    label: "更新功能与用例",
+                    kinds: ["feature-revise", "usecase-revise", "usecase-generate"]
+                  }
+                ]}
+              />
+            ) : null}
+            <div className="px-5 pt-3 pb-2 text-[11px] text-slate-500">
+              <span className="font-medium text-slate-700">{data.length}</span> 个模块 ·{" "}
+              <span className="font-medium text-slate-700">
+                {data.reduce((acc, m) => acc + m.features.length, 0)}
+              </span>{" "}
+              个功能点 · 悬停叶节点看决策者视角 + 快速投反馈 · 点击看完整详情 ·{" "}
+              <span className="text-sky-700" title="7 天内新建未审">新增</span>{" "}
+              <span className="text-emerald-700" title="决策者已标已审">已审</span>{" "}
+              <span className="text-amber-700" title="反馈池待 Agent 处理">反馈</span>{" "}
+              <span className="text-rose-700" title="frontmatter needs_revision=true">待 Agent</span>
+            </div>
+          </>
         ) : null}
-        <div className="px-5 pt-3 pb-2 text-[11px] text-slate-500">
-          <span className="font-medium text-slate-700">{data.length}</span> 个模块 ·{" "}
-          <span className="font-medium text-slate-700">
-            {data.reduce((acc, m) => acc + m.features.length, 0)}
-          </span>{" "}
-          个功能点 · 悬停叶节点看决策者视角 + 快速投反馈 · 点击看完整详情 ·{" "}
-          <span className="text-sky-700" title="7 天内新建未审">新增</span>{" "}
-          <span className="text-emerald-700" title="决策者已标已审">已审</span>{" "}
-          <span className="text-amber-700" title="反馈池待 Agent 处理">反馈</span>{" "}
-          <span className="text-rose-700" title="frontmatter needs_revision=true">待 Agent</span>
-        </div>
         <div
           className="relative flex-1 overflow-hidden border-t border-slate-200 bg-slate-50"
           onWheel={(e) => {

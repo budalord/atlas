@@ -1,6 +1,7 @@
 import type { ProductPhase } from "./productPhase";
 
 export type TabKey =
+  | "flow"
   | "features"
   | "overview"
   | "spec"
@@ -26,6 +27,7 @@ export type TabMode = "read-write" | "read-only";
  */
 const TABS_BY_PHASE: Record<ProductPhase, Array<{ key: TabKey; mode: TabMode }>> = {
   planning: [
+    { key: "flow", mode: "read-write" },
     { key: "overview", mode: "read-write" },
     { key: "features", mode: "read-write" },
     { key: "actors", mode: "read-write" },
@@ -34,6 +36,7 @@ const TABS_BY_PHASE: Record<ProductPhase, Array<{ key: TabKey; mode: TabMode }>>
     { key: "design", mode: "read-write" }
   ],
   "in-progress": [
+    { key: "flow", mode: "read-write" },
     { key: "overview", mode: "read-write" },
     { key: "features", mode: "read-write" },
     { key: "actors", mode: "read-write" },
@@ -42,6 +45,7 @@ const TABS_BY_PHASE: Record<ProductPhase, Array<{ key: TabKey; mode: TabMode }>>
     { key: "design", mode: "read-only" }
   ],
   live: [
+    { key: "flow", mode: "read-only" },
     { key: "overview", mode: "read-only" },
     { key: "features", mode: "read-only" },
     { key: "actors", mode: "read-only" },
@@ -63,6 +67,7 @@ const TABS_BY_PHASE: Record<ProductPhase, Array<{ key: TabKey; mode: TabMode }>>
 };
 
 export const TAB_LABELS: Record<TabKey, string> = {
+  flow: "依赖流总览",
   features: "功能与用例",
   overview: "概览",
   spec: "规格",          // v0.1 rev3 隐藏, label 保留供升级回滚
