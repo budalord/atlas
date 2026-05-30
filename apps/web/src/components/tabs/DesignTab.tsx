@@ -22,8 +22,8 @@ export function DesignTab({ productId, readOnly = false }: DesignTabProps) {
           <AgentTaskTriggers
             productId={productId}
             triggers={[
-              { label: "生成屏幕", kinds: ["screen-generate"] },
-              { label: "更新屏幕", kinds: ["screen-revise"] }
+              { label: "生成界面规格", kinds: ["screen-generate"] },
+              { label: "更新界面规格", kinds: ["screen-revise"] }
             ]}
           />
         ) : null}

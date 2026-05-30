@@ -26,6 +26,7 @@ export function ScreenList({ productId, readOnly = false }: ScreenListProps) {
   const [error, setError] = useState<string | null>(null);
   const [feedbackInput, setFeedbackInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [lightbox, setLightbox] = useState<string | null>(null);
 
   const loadList = useCallback(async () => {
     try {
@@ -220,7 +221,7 @@ export function ScreenList({ productId, readOnly = false }: ScreenListProps) {
         </div>
         {grouped.length === 0 ? (
           <div className="px-4 py-6 text-xs text-slate-400">
-            该产品暂无 Screen。用上方「生成屏幕」让 agent 反推。
+            该产品暂无界面屏。用上方「生成界面规格」让 agent 从用例反推。
           </div>
         ) : (
           <ul className="divide-y divide-slate-100">
@@ -357,9 +358,15 @@ export function ScreenList({ productId, readOnly = false }: ScreenListProps) {
                   ) : null}
                 </div>
                 <img
-                  className="mt-2 max-h-[480px] w-auto rounded border border-violet-200"
+                  className="mt-2 max-h-[480px] w-auto cursor-zoom-in rounded border border-violet-200"
                   src={`/api/products/${productId}/screens/${detail.module}/${detail.id}/pending-image?v=${encodeURIComponent(detail.pending_prototype)}`}
                   alt={`${detail.name} 待审原型图`}
+                  title="点击查看高清大图"
+                  onClick={() =>
+                    setLightbox(
+                      `/api/products/${productId}/screens/${detail.module}/${detail.id}/pending-image?v=${encodeURIComponent(detail.pending_prototype as string)}`
+                    )
+                  }
                 />
                 <div className="mt-1 break-all text-[10px] text-slate-400">{detail.pending_prototype}</div>
               </section>
@@ -372,9 +379,15 @@ export function ScreenList({ productId, readOnly = false }: ScreenListProps) {
                   {detail.pending_prototype ? "当前已通过(通过上面的新图后将被替换)" : "原型图(已通过)"}
                 </div>
                 <img
-                  className="mt-2 max-h-[480px] w-auto rounded border border-slate-200"
+                  className="mt-2 max-h-[480px] w-auto cursor-zoom-in rounded border border-slate-200"
                   src={`/api/products/${productId}/screens/${detail.module}/${detail.id}/preview-image?v=${encodeURIComponent(detail.preview_image)}`}
                   alt={`${detail.name} 原型图`}
+                  title="点击查看高清大图"
+                  onClick={() =>
+                    setLightbox(
+                      `/api/products/${productId}/screens/${detail.module}/${detail.id}/preview-image?v=${encodeURIComponent(detail.preview_image as string)}`
+                    )
+                  }
                 />
                 <div className="mt-1 break-all text-[10px] text-slate-400">{detail.preview_image}</div>
               </section>
@@ -486,6 +499,27 @@ export function ScreenList({ productId, readOnly = false }: ScreenListProps) {
           <div className="p-10 text-center text-sm text-slate-400">选一个 Screen 查看详情</div>
         )}
       </div>
+
+      {lightbox ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6"
+          onClick={() => setLightbox(null)}
+        >
+          <img
+            className="max-h-[95vh] max-w-[95vw] rounded object-contain shadow-2xl"
+            src={lightbox}
+            alt="原型图大图"
+            onClick={(e) => e.stopPropagation()}
+          />
+          <button
+            className="absolute right-5 top-4 rounded bg-white/90 px-3 py-1 text-sm font-medium text-slate-900 hover:bg-white"
+            onClick={() => setLightbox(null)}
+            type="button"
+          >
+            关闭 ✕
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
