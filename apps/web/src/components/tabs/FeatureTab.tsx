@@ -371,8 +371,11 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
             className="px-5 pt-3"
             productId={productId}
             triggers={[
-              { label: "生成用例", kinds: ["usecase-generate"] },
-              { label: "更新功能与用例", kinds: ["feature-revise", "usecase-revise"] }
+              {
+                // 一次过:按反馈修订功能 → 修订用例 → 给无用例的功能补用例(三个 agent 串行排队)
+                label: "更新功能与用例",
+                kinds: ["feature-revise", "usecase-revise", "usecase-generate"]
+              }
             ]}
           />
         ) : null}

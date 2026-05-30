@@ -372,9 +372,11 @@ async function runBatchRevise(t: BatchTask, builder: PromptBuilder): Promise<voi
   }
 
   if (result.changedFiles.length === 0) {
-    setStage(t, "failed", {
+    // 零变更不算失败: revise 任务无待处理项 / agent 判断无需改动是正常的。
+    // 直接进 completed(无可审内容)+ "无变更" 摘要, 不报红 failed。
+    setStage(t, "completed", {
       finishedAt: new Date().toISOString(),
-      error: "codex 跑完无任何文件变更, 可能 agent 判断无需改动或输出格式异常"
+      summaryLine: "本次无文件变更(无待处理项或 agent 判断无需改动)"
     });
     return;
   }
