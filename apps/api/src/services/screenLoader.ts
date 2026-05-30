@@ -13,6 +13,7 @@ import { parseMarkdownWithFrontmatter } from "./markdownParser";
 import { parseFeedbackSection } from "./feedbackParser";
 import { loadUseCases } from "./usecaseLoader";
 import { loadActors } from "./actorLoader";
+import { loadModules, loadFeatures } from "./entityLoader";
 import { loadDerivedEntities } from "./derivedEntityLoader";
 import { parseEntityFieldTable } from "./entityFieldTableParser";
 
@@ -307,9 +308,31 @@ export async function validateScreen(
 
   // 2/3. entity_visibility entity 必须存在 + 必须被某个 usecase 引用
   const entityIndex = new Map(allEntities.map((e) => [e.name, e] as const));
+
+  // usecase.entity_ids 为空时按 usecase-contract 继承 function.entities_touched —
+  // 加载全部 function 的 entities_touched 备查(加载失败不阻断, 退回原行为)。
+  const fnEntitiesTouched = new Map<string, string[]>();
+  try {
+    const modules = await loadModules(productId);
+    for (const mod of modules) {
+      const features = await loadFeatures(productId, mod.name);
+      for (const f of features) {
+        if (f.entities_touched && f.entities_touched.length > 0) {
+          fnEntitiesTouched.set(f.id, f.entities_touched);
+        }
+      }
+    }
+  } catch {
+    /* features 加载失败 — 退回仅用 entity_ids */
+  }
+
   const entitiesReachableFromUseCases = new Set<string>();
   for (const uc of myUseCases) {
-    for (const eid of uc.entity_ids ?? []) entitiesReachableFromUseCases.add(eid);
+    const eids =
+      uc.entity_ids && uc.entity_ids.length > 0
+        ? uc.entity_ids
+        : fnEntitiesTouched.get(uc.function_id) ?? [];
+    for (const eid of eids) entitiesReachableFromUseCases.add(eid);
   }
 
   for (const [entityName, vis] of Object.entries(screen.entity_visibility)) {

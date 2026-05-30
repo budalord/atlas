@@ -1034,8 +1034,8 @@ export async function buildUseCaseGeneratePrompt(productId: string): Promise<Gen
 id: <scenario-id>                 # 必填, 与文件名一致
 function_id: <feature-id>         # 必填, 真源, 裸 id 不带 module 前缀
 actor_id: <actor_id>             # 必填, 主参与者(单数!其他角色在主流程步骤里说明)
-entity_ids:                       # 可选, 默认继承 function.entities_touched
-  - <Entity>
+entity_ids:                       # **强烈建议填**: 列出本用例主流程实际读写的实体(从你写的步骤里提到的实体名提取)
+  - <Entity>                      #   下游界面屏靠它锚定实体 — 留空且 function.entities_touched 也空时, 屏会校验报错
 precondition: <进入这个场景的前置条件>
 postcondition: <这个场景结束后的状态>
 source: agent_suggested
@@ -1073,7 +1073,7 @@ added_at: <YYYY-MM-DD>
 - \`actor_id\` 必须是产品 \`actors/\` 里存在的 actor id, 且应在该 function 的 actor_ids 范围内
 - \`function_id\` 必须是真实存在的 feature id(裸 id)
 - **单主 actor**: usecase 只有 1 个主 actor, 不写 secondary_actor_ids;协作角色在主流程步骤文字里点名
-- 不发明实体名;entity_ids 留空则继承 function.entities_touched
+- **entity_ids 尽量填全**: 凡主流程步骤里读/写到的实体(如"保存 PaymentRecord"→ PaymentRecord, "选择订单"→ Order)都列进 entity_ids, 不发明不存在的实体名。这是下游界面屏的实体锚点, 漏填会让屏校验报 entity-not-referenced-by-usecase
 - 新建文件**不写** needs_revision(新建即基线)
 
 ## 落盘方式
