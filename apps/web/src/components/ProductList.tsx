@@ -42,7 +42,7 @@ export function ProductList({ products, selectedProductId, onSelect }: ProductLi
     setCollapsed((prev) => ({ ...prev, [phase]: !prev[phase] }));
 
   return (
-    <aside className="min-h-0 overflow-auto border-b border-slate-200 bg-white p-4 lg:border-b-0 lg:border-r">
+    <aside className="sticky top-0 z-10 max-h-screen min-h-0 self-start overflow-y-auto border-b border-slate-200 bg-white p-4 lg:border-b-0 lg:border-r">
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-sm font-semibold text-slate-950">产品</h2>
         <span className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-600">{products.length}</span>

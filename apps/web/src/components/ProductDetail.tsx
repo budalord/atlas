@@ -31,6 +31,7 @@ interface ProductDetailProps {
 
 export function ProductDetail({ product }: ProductDetailProps) {
   const [tab, setTab] = useState<TabKey>("flow");
+  const [metaOpen, setMetaOpen] = useState(false);
   const [openFeatureId, setOpenFeatureId] = useState<string | null>(null);
   const consumeFeatureOpen = useUiStore((s) => s.consumeFeatureOpen);
   const pendingFeatureOpen = useUiStore((s) => s.pendingFeatureOpen);
@@ -82,7 +83,15 @@ export function ProductDetail({ product }: ProductDetailProps) {
               <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">{product.meta.tagline}</p>
             ) : null}
           </div>
+          <button
+            className="shrink-0 rounded border border-slate-200 px-2 py-1 text-[11px] text-slate-500 hover:bg-slate-50"
+            onClick={() => setMetaOpen((v) => !v)}
+            type="button"
+          >
+            详情 {metaOpen ? "▴" : "▾"}
+          </button>
         </div>
+        {metaOpen ? (
         <dl className="mt-5 flex flex-wrap gap-x-6 gap-y-2 text-xs text-slate-600">
           <MetaInline label="更新" value={product.last_updated ?? "未填写"} />
           <MetaInline label="源路径" value={product.meta.source_path ?? "—"} />
@@ -109,39 +118,31 @@ export function ProductDetail({ product }: ProductDetailProps) {
             <MetaInline label="文档版本" value={product.meta.doc_version} />
           ) : null}
         </dl>
+        ) : null}
       </section>
-      <ReviewDashboard productId={product.id} />
-      {statusToPhase(product.meta.status) !== "archived" ? (
-        <>
-          <RecentActivityStrip productId={product.id} />
-          <AgentTasksPanel productId={product.id} />
-        </>
-      ) : null}
+      <ReviewDashboard
+        productId={product.id}
+        rightSlot={
+          phase !== "archived" ? <RecentActivityStrip compact productId={product.id} /> : undefined
+        }
+      />
+      {phase !== "archived" ? <AgentTasksPanel productId={product.id} /> : null}
 
-      <nav className="flex flex-wrap items-center gap-1 border-b border-slate-200 bg-white px-6">
-        {tabs.map((t) => {
-          const active = t.key === tab;
-          return (
-            <button
-              className={`-mb-px border-b-2 px-3 py-2.5 text-sm transition ${
-                active
-                  ? "border-slate-900 font-semibold text-slate-950"
-                  : "border-transparent text-slate-500 hover:text-slate-800"
-              }`}
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              type="button"
-            >
-              {TAB_LABELS[t.key]}
-              {t.mode === "read-only" ? (
-                <span className="ml-1 rounded bg-slate-100 px-1 py-0.5 text-[10px] font-normal text-slate-500">
-                  只读
-                </span>
-              ) : null}
-            </button>
-          );
-        })}
-      </nav>
+      {tab !== "flow" && tabs.some((t) => t.key === "flow") ? (
+        <div className="flex items-center gap-3 border-b border-slate-200 bg-white px-6 py-2">
+          <button
+            className="rounded border border-slate-300 px-2.5 py-1 text-[12px] font-medium text-slate-700 hover:bg-slate-50"
+            onClick={() => setTab("flow")}
+            type="button"
+          >
+            ← 返回依赖流总览
+          </button>
+          <span className="text-sm font-semibold text-slate-900">{TAB_LABELS[tab]}</span>
+          {readOnly ? (
+            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">只读</span>
+          ) : null}
+        </div>
+      ) : null}
 
       {tab === "flow" ? (
         <ProductFlowOverview productId={product.id} readOnly={readOnly} onDrill={setTab} />

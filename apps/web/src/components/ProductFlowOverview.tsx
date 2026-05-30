@@ -66,6 +66,15 @@ export function ProductFlowOverview({ productId, readOnly = false, onDrill }: Pr
 
   return (
     <div className="space-y-3 p-5">
+      <div className="flex items-center justify-end">
+        <button
+          className="text-[11px] text-slate-500 hover:text-indigo-700"
+          onClick={() => onDrill("overview")}
+          type="button"
+        >
+          📄 概览 / 项目文档 →
+        </button>
+      </div>
       <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(360px,420px)]">
         {/* ===== 左:入口① 真源 markmap + 派生层 ===== */}
         <div className="space-y-3">

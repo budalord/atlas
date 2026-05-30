@@ -17,6 +17,7 @@ interface AgentTasksPanelProps {
 export function AgentTasksPanel({ productId }: AgentTasksPanelProps) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [reviewTask, setReviewTask] = useState<Task | null>(null);
+  const [progressTask, setProgressTask] = useState<Task | null>(null);
   const requestFeatureOpen = useUiStore((s) => s.requestFeatureOpen);
 
   const load = async () => {
@@ -33,8 +34,12 @@ export function AgentTasksPanel({ productId }: AgentTasksPanelProps) {
   const handleTaskClick = (t: Task) => {
     if (t.kind === "feature-refine") {
       requestFeatureOpen(t.productId, t.featureId);
-    } else {
+    } else if (t.stage === "awaiting_review") {
+      // 待审:直接进 changeset 审阅(它就是"输出")
       setReviewTask(t);
+    } else {
+      // running/queued/completed/rejected/failed:看进度 + 输出
+      setProgressTask(t);
     }
   };
 
@@ -54,6 +59,7 @@ export function AgentTasksPanel({ productId }: AgentTasksPanelProps) {
       const res = await fetch(`/api/tasks/${t.id}`, { method: "DELETE" });
       if (!res.ok) return;
       if (reviewTask?.id === t.id) setReviewTask(null);
+      if (progressTask?.id === t.id) setProgressTask(null);
       await load();
     } catch {
       /* ignore */
@@ -75,6 +81,13 @@ export function AgentTasksPanel({ productId }: AgentTasksPanelProps) {
     if (fresh && fresh !== reviewTask) setReviewTask(fresh);
     if (!fresh) setReviewTask(null);
   }, [tasks, reviewTask]);
+  // 进度 modal 同步:running 时 steps 实时刷新;任务消失则关闭
+  useEffect(() => {
+    if (!progressTask) return;
+    const fresh = tasks.find((t) => t.id === progressTask.id);
+    if (fresh && fresh !== progressTask) setProgressTask(fresh);
+    if (!fresh) setProgressTask(null);
+  }, [tasks, progressTask]);
 
   const buckets = useMemo(() => {
     const active = tasks.filter(
@@ -188,7 +201,117 @@ export function AgentTasksPanel({ productId }: AgentTasksPanelProps) {
       {reviewTask ? (
         <ReviewChangesetModal onClose={() => setReviewTask(null)} task={reviewTask} />
       ) : null}
+      {progressTask ? (
+        <TaskProgressModal
+          onClose={() => setProgressTask(null)}
+          onReview={() => {
+            setReviewTask(progressTask);
+            setProgressTask(null);
+          }}
+          task={progressTask}
+        />
+      ) : null}
     </section>
+  );
+}
+
+/**
+ * 任务进度/输出详情 modal:running 看步骤时间线(跑到哪)、completed/rejected 看业务摘要 +
+ * 改动文件、failed 看 error。awaiting_review 提供「去审阅」按钮进 ReviewChangesetModal。
+ */
+function TaskProgressModal({
+  task,
+  onClose,
+  onReview
+}: {
+  task: Task;
+  onClose: () => void;
+  onReview: () => void;
+}) {
+  const steps = task.steps ?? [];
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={onClose}>
+      <div
+        className="flex max-h-[85vh] w-full max-w-2xl flex-col rounded-lg bg-white shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="flex items-baseline justify-between gap-3 border-b border-slate-200 px-5 py-3">
+          <div className="min-w-0">
+            <h2 className="truncate text-base font-semibold text-slate-950">{task.title}</h2>
+            <p className="mt-0.5 font-mono text-[11px] text-slate-500">
+              {task.kind}
+              {task.summaryLine ? ` · ${task.summaryLine}` : ""}
+            </p>
+          </div>
+          <StageChip stage={task.stage} />
+        </header>
+
+        <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
+          {task.stage === "failed" && task.error ? (
+            <div className="mb-3 rounded border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+              {task.error}
+            </div>
+          ) : null}
+
+          {task.changedFiles && task.changedFiles.length > 0 ? (
+            <div className="mb-4">
+              <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                改动文件 ({task.changedFiles.length})
+              </div>
+              <ul className="space-y-1">
+                {task.changedFiles.map((f, i) => (
+                  <li className="flex items-baseline gap-2 text-[12px]" key={i}>
+                    <span className="font-mono text-[10px] text-slate-400">{f.action}</span>
+                    <span className="font-mono text-slate-700">{f.path}</span>
+                    {f.summary?.line ? <span className="text-slate-500">· {f.summary.line}</span> : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            执行步骤 {steps.length > 0 ? `(${steps.length})` : ""}
+          </div>
+          {steps.length === 0 ? (
+            <div className="text-[12px] text-slate-400">
+              {task.stage === "queued" ? "排队中,尚未开始。" : "暂无步骤记录。"}
+            </div>
+          ) : (
+            <ol className="space-y-1.5">
+              {steps.map((s, i) => (
+                <li className="flex items-baseline gap-2 text-[12px]" key={i}>
+                  <span className="font-mono text-[10px] text-slate-400">{i + 1}</span>
+                  <span className="font-mono text-slate-700">{s.label}</span>
+                  {task.stage === "running" && i === steps.length - 1 ? (
+                    <span className="animate-pulse text-amber-600">●</span>
+                  ) : null}
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+
+        <footer className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3">
+          {task.stage === "awaiting_review" ? (
+            <button
+              className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
+              onClick={onReview}
+              type="button"
+            >
+              去审阅 changeset
+            </button>
+          ) : null}
+          <button
+            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            onClick={onClose}
+            type="button"
+          >
+            关闭
+          </button>
+        </footer>
+      </div>
+    </div>
   );
 }
 

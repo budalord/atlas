@@ -6,6 +6,8 @@ interface RecentActivityStripProps {
   productId: string;
   /** 默认 7 天 */
   days?: number;
+  /** 头部右侧紧凑形态(无边框/全宽,做成 stat 行)。 */
+  compact?: boolean;
 }
 
 interface HistorySummary {
@@ -25,7 +27,7 @@ interface HistoryResponse {
  * v0.2c §5.6c: 跨任务累积视角 - 产品页顶部 strip, 显示本周 agent batch 累积。
  * 数据源: ~/.atlas/products/<id>/task-history.jsonl (Atlas 重启后仍在)
  */
-export function RecentActivityStrip({ productId, days = 7 }: RecentActivityStripProps) {
+export function RecentActivityStrip({ productId, days = 7, compact = false }: RecentActivityStripProps) {
   const [data, setData] = useState<HistoryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,6 +59,18 @@ export function RecentActivityStrip({ productId, days = 7 }: RecentActivityStrip
   if (s.byStage.rejected > 0) stageParts.push(`✗ ${s.byStage.rejected}`);
   if (s.byStage.failed > 0) stageParts.push(`✗ ${s.byStage.failed} failed`);
 
+  if (compact) {
+    return (
+      <div className="flex items-center gap-3 whitespace-nowrap text-[11px] text-slate-500">
+        <span className="font-medium text-slate-600">最近 {days} 天</span>
+        <Stat n={s.count} label="batch" />
+        <Stat n={s.byStage.completed ?? 0} label="完成" tone="text-emerald-700" />
+        <Stat n={(s.byStage.rejected ?? 0) + (s.byStage.failed ?? 0)} label="驳回/失败" tone="text-rose-700" />
+        {s.schemaRejects > 0 ? <Stat n={s.schemaRejects} label="schema 拦截" tone="text-amber-700" /> : null}
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-slate-200 bg-slate-50 px-6 py-1.5 text-[11px] text-slate-600">
       <span className="font-medium text-slate-700">📈 最近 {days} 天 agent 活动</span>
@@ -68,5 +82,14 @@ export function RecentActivityStrip({ productId, days = 7 }: RecentActivityStrip
         <span className="text-amber-700">· schema 拦截 {s.schemaRejects}</span>
       ) : null}
     </div>
+  );
+}
+
+function Stat({ n, label, tone }: { n: number; label: string; tone?: string }) {
+  return (
+    <span className="flex items-baseline gap-1">
+      <span className={`text-[13px] font-semibold ${tone ?? "text-slate-800"}`}>{n}</span>
+      <span>{label}</span>
+    </span>
   );
 }

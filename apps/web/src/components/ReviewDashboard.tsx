@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useDataChange } from "../lib/useDataChange";
 import type {
   ActorWithRefs,
@@ -14,6 +14,8 @@ import type {
 
 interface ReviewDashboardProps {
   productId: string;
+  /** 右侧附加内容(头部把「最近 7 天 agent 活动」放这,与审查进度同一行)。 */
+  rightSlot?: ReactNode;
 }
 
 interface DashboardData {
@@ -43,7 +45,7 @@ interface DashboardData {
  *   - L0 gate: 0 违规
  *   - 三者全 pass → 顶部绿色"立项审查通过"
  */
-export function ReviewDashboard({ productId }: ReviewDashboardProps) {
+export function ReviewDashboard({ productId, rightSlot }: ReviewDashboardProps) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -166,7 +168,7 @@ export function ReviewDashboard({ productId }: ReviewDashboardProps) {
         allPass ? "border-emerald-200 bg-emerald-50/80" : "border-slate-200 bg-slate-50"
       }`}
     >
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-6 py-2 text-[12px]">
+      <div className="flex flex-nowrap items-center gap-x-5 overflow-x-auto px-6 py-2 text-[12px]">
         {allPass ? (
           <span className="font-semibold text-emerald-900">立项审查通过 — 可进入开发</span>
         ) : (
@@ -178,19 +180,6 @@ export function ReviewDashboard({ productId }: ReviewDashboardProps) {
           primary={`${data.actors.total}`}
           tone={data.actors.total === 0 ? "warn" : "info"}
           hint={data.actors.total === 0 ? "未建 actor 池 (五层骨架不完整)" : null}
-        />
-
-        <DashItem
-          label="Capability"
-          primary={`${data.capabilities.confirmed}/${data.capabilities.total}`}
-          tone={
-            data.capabilities.total === 0
-              ? "warn"
-              : data.capabilities.confirmed === data.capabilities.total
-                ? "ok"
-                : "info"
-          }
-          hint={data.capabilities.draft > 0 ? `${data.capabilities.draft} 个 draft 待确认` : null}
         />
 
         <DashItem
@@ -236,19 +225,6 @@ export function ReviewDashboard({ productId }: ReviewDashboardProps) {
         />
 
         <DashItem
-          label="全局需求池"
-          primary={`${data.globalFeedback.feature + data.globalFeedback.entity + data.globalFeedback.prototype}`}
-          tone={
-            data.globalFeedback.feature + data.globalFeedback.entity + data.globalFeedback.prototype === 0
-              ? "muted"
-              : "info"
-          }
-          hint={
-            `${data.globalFeedback.feature}·${data.globalFeedback.entity}·${data.globalFeedback.prototype} 功能·实体·原型`
-          }
-        />
-
-        <DashItem
           label="L0 违规"
           primary={data.l0.exists ? `${data.l0.violations}` : "—"}
           tone={!data.l0.exists ? "muted" : data.l0.violations === 0 ? "ok" : "warn"}
@@ -258,6 +234,7 @@ export function ReviewDashboard({ productId }: ReviewDashboardProps) {
               : null
           }
         />
+        {rightSlot ? <div className="ml-auto shrink-0 pl-4">{rightSlot}</div> : null}
       </div>
     </div>
   );

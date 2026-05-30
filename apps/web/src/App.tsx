@@ -95,7 +95,7 @@ function OverviewPage() {
           <ProductDetail product={selectedProduct} />
         )}
       </div>
-      <aside className="min-h-0 overflow-auto border-t border-slate-200 bg-white xl:border-l xl:border-t-0">
+      <aside className="sticky top-0 max-h-screen min-h-0 self-start overflow-y-auto border-t border-slate-200 bg-white xl:border-l xl:border-t-0">
         <ContractList contracts={contracts} />
         <AgentInbox claudeDoc={claudeDoc} />
       </aside>
