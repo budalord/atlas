@@ -28,6 +28,7 @@ const BATCH_KINDS: ReadonlyArray<Exclude<TaskKind, "feature-refine">> = [
   "entity-revise",
   "entity-derive",
   "feature-generate",
+  "usecase-generate",
   "conventions-generate"
 ];
 

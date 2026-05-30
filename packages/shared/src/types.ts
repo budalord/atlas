@@ -741,6 +741,7 @@ export type TaskKind =
   | "entity-revise"
   | "entity-derive"
   | "feature-generate"
+  | "usecase-generate"
   | "conventions-generate";
 
 /** batch kinds 跑完后, 由 changesetTracker 反推的单条文件变更。 */
@@ -834,6 +835,10 @@ export interface FeatureGenerateTask extends BaseTask {
   kind: "feature-generate";
 }
 
+export interface UseCaseGenerateTask extends BaseTask {
+  kind: "usecase-generate";
+}
+
 export interface ConventionsGenerateTask extends BaseTask {
   kind: "conventions-generate";
 }
@@ -848,6 +853,7 @@ export type Task =
   | EntityReviseTask
   | EntityDeriveTask
   | FeatureGenerateTask
+  | UseCaseGenerateTask
   | ConventionsGenerateTask;
 
 /** 兼容别名: 旧代码用 RefineTask = FeatureRefineTask */

@@ -370,7 +370,10 @@ export function FeatureTab({ productId, readOnly = false }: FeatureTabProps) {
           <AgentTaskTriggers
             className="px-5 pt-3"
             productId={productId}
-            triggers={[{ label: "更新功能与用例", kinds: ["feature-revise", "usecase-revise"] }]}
+            triggers={[
+              { label: "生成用例", kinds: ["usecase-generate"] },
+              { label: "更新功能与用例", kinds: ["feature-revise", "usecase-revise"] }
+            ]}
           />
         ) : null}
         <div className="px-5 pt-3 pb-2 text-[11px] text-slate-500">

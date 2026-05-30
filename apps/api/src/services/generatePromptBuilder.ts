@@ -935,6 +935,167 @@ ${usecases.length === 0 ? "(无 — 请先 revise / 补 usecase 后再来生成 
 }
 
 /**
+ * UseCase Generate prompt (v0.1 双轨设计 · 业务轨补全)。
+ *
+ * 补双轨梯子缺的一格: 从 function(feature)反推 usecase。 screen-generate 从 usecase 反推屏,
+ * 但 usecase 这层之前没有"从功能反推"的 agent, 导致没用例的功能出不了屏。
+ *
+ * 设计:
+ *   - 只针对**没有任何 usecase 的 function**(已有 usecase 的不动)
+ *   - Step 1 强制判断: 哪些 function 该补 usecase / 补几个(按 usecase-contract §3 拆分规则)
+ *   - 严守"可空"原则: 纯入口 / 纯聚合视图 / 纯查询 function 不强行造 usecase
+ *   - 读盘风格: agent 自己读 features / usecases, prompt 只给索引
+ */
+export async function buildUseCaseGeneratePrompt(productId: string): Promise<GenerateResult> {
+  const meta = await loadMeta(productId);
+  const stats = await collectStats(productId);
+  const modules = await loadModules(productId);
+  const usecases = await loadUseCases(productId);
+
+  const ucCountByFn = new Map<string, number>();
+  for (const u of usecases) ucCountByFn.set(u.function_id, (ucCountByFn.get(u.function_id) ?? 0) + 1);
+
+  const bareLines: string[] = [];
+  const coveredLines: string[] = [];
+  for (const mod of modules) {
+    const features = await loadFeatures(productId, mod.name);
+    for (const f of features) {
+      const n = ucCountByFn.get(f.id) ?? 0;
+      if (n > 0) {
+        coveredLines.push(`- [${mod.name}/${f.id}] ${f.name} (已有 ${n} usecase)`);
+        continue;
+      }
+      const actors = (f.actor_ids ?? f.roles ?? []).join(", ") || "(未指定)";
+      const desc = f.description.trim().replace(/\s+/g, " ").slice(0, 160);
+      bareLines.push(
+        `- [${mod.name}/${f.id}] ${f.name} · actors: [${actors}]${f.capability_id ? ` · capability: ${f.capability_id}` : ""}${desc ? `\n    ${desc}` : ""}`
+      );
+    }
+  }
+
+  const prompt = [
+    header(meta, productId, "业务用例 UseCase"),
+    AGENT_SELF_DECISION_PRINCIPLE,
+    "",
+    `## 你的任务
+
+你是 Atlas 的 UseCase 推导 Agent (v0.1 双轨设计 · 业务轨)。 任务:对**当前没有任何 usecase 的 function(功能点)**, 按业务场景反推 usecase, 产出 \`modules/<m>/usecases/<scenario-id>.md\`。
+
+严格遵守 **usecase-contract**(\`docs/usecase-contract.md\`)。已有 usecase 的 function **不要动**。
+
+## Step 1 · 补全判断(强制先输出)
+
+逐个扫"无用例 function", 对每个判断:**该不该补 usecase?补几个?**
+
+### 该补几个 — 按 usecase-contract §3 拆分规则
+
+**应拆为多个 usecase(§3.1)**:
+- 同动作**不同 actor 发起**(销售提 vs 教务发起)
+- 同动作**不同前置条件 / 业务路径**(抖音渠道录入 vs 线下渠道录入)
+- 同动作**不同数据流向 / 外部系统**(微信原路退 vs 对公转账)
+
+**不拆, 合一个(§3.2)**:仅字段差 / 仅 UI 入口差 / 仅状态机一条边差 → 用 function 自身的段表达, 不拆 usecase。
+
+**判断公式(§3.3)**:两个场景主流程步骤超过 2 步不同 / precondition 导致进入路径完全不同 / postcondition 涉及完全不同下游 → 拆;否则合一个。
+
+### ⚠️ "可空"原则(usecase-contract §1.3)—— 不要为凑数硬造
+
+**简单 function 不挂任何 usecase 是合法且正确的**:
+- 纯入口 / 导航页、纯聚合视图(看板/列表)、纯查询、纯配置项 → 通常**不需要** usecase, 它们的行为已在 function 描述里说清
+- 只有当 function 承载**有步骤序列的业务场景**(录入流程、审批流、状态流转、跨角色协作)时, 才补 usecase
+- 宁可一个 function 0 usecase, 也不要造一个"主流程就 1-2 步、跟 function 描述重复"的水 usecase
+
+### Step 1 输出格式
+
+\`\`\`
+## 补全判断
+本轮处理范围: [function-a, function-b, ...]
+- function-a (module: <m>): 补 N 个 usecase
+  - {usecase-id-1}: actor=<actor_id>, precondition=<...>  ← 拆分理由
+  - {usecase-id-2}: actor=<actor_id>, precondition=<...>
+- function-b (module: <m>): 0 usecase — 理由: 纯聚合视图, 无步骤序列
+\`\`\`
+
+**渐进产出允许**: 不要求一轮补完全部 function, 但必须显式声明本轮范围。
+
+## Step 2 · 为每个 usecase 生成 markdown
+
+**先输出 diff plan, 等用户确认后再 Edit/Write。**
+
+### 文件位置与命名(usecase-contract §4)
+- 路径: \`modules/<module-id>/usecases/<scenario-id>.md\`(与 features/ 平级)
+- 文件名 = **场景关键词**, 不带 function_id 前缀(✅ \`douyin-channel.md\` ❌ \`student-intake-douyin.md\`)
+- \`id\` = 文件名(kebab-case), function 内唯一
+
+### Frontmatter(usecase-contract §2)
+
+\`\`\`yaml
+---
+id: <scenario-id>                 # 必填, 与文件名一致
+function_id: <feature-id>         # 必填, 真源, 裸 id 不带 module 前缀
+actor_id: <actor_id>             # 必填, 主参与者(单数!其他角色在主流程步骤里说明)
+entity_ids:                       # 可选, 默认继承 function.entities_touched
+  - <Entity>
+precondition: <进入这个场景的前置条件>
+postcondition: <这个场景结束后的状态>
+source: agent_suggested
+added_in_phase: planning
+added_at: <YYYY-MM-DD>
+---
+\`\`\`
+
+### Body 段(usecase-contract §2)
+
+\`\`\`markdown
+# <场景中文名>
+
+## 主流程
+1. <步骤 1>
+2. <步骤 2>
+（目标 8 步;超过 12 步说明该拆, 写 frontmatter.split_suggestion 交人决策, 不硬塞)
+
+## 备选流程
+- <条件 A> → <走法>
+- <异常分支> → <处理>
+
+## 备注
+<数据流向特殊点 / 外部系统集成 / 异常处理, 没有可省>
+
+## 反馈池
+
+\`\`\`yaml
+[]
+\`\`\`
+\`\`\`
+
+## 强约束
+
+- \`actor_id\` 必须是产品 \`actors/\` 里存在的 actor id, 且应在该 function 的 actor_ids 范围内
+- \`function_id\` 必须是真实存在的 feature id(裸 id)
+- **单主 actor**: usecase 只有 1 个主 actor, 不写 secondary_actor_ids;协作角色在主流程步骤文字里点名
+- 不发明实体名;entity_ids 留空则继承 function.entities_touched
+- 新建文件**不写** needs_revision(新建即基线)
+
+## 落盘方式
+
+直接用 Edit/Write 写文件, 或 \`POST /api/products/${productId}/usecases\`(body 含 module + function_id + scenario id + body)。 写完每个文件**必须**用 Bash 调 \`POST /api/agent/validate/usecase\` 校验, 不通过就改到通过。
+
+## 当前【无用例】的 function(本次补全目标, 共 ${bareLines.length} 个)
+
+${bareLines.length === 0 ? "(无 — 所有 function 都已有 usecase 或不需要)" : bareLines.join("\n")}
+
+## 已有 usecase 的 function(**不要动**)
+
+${coveredLines.length === 0 ? "(无)" : coveredLines.join("\n")}
+`,
+    "",
+    FOOTER(productId, "- 只补 usecase, 不改 features / actors / entities\n- 已有 usecase 的 function 一律不碰\n- 可空原则: 简单 function 留 0 usecase 是对的, 别造水 usecase")
+  ].join("\n");
+
+  return { prompt, stats };
+}
+
+/**
  * v0.1 兼容别名 — 旧 scope "prototype" 仍可调用, 内部转发到 Screen generate。
  * v0.2 完成迁移后可删。
  */

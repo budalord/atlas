@@ -14,6 +14,7 @@ import type {
   EntityReviseTask,
   EntityDeriveTask,
   FeatureGenerateTask,
+  UseCaseGenerateTask,
   ConventionsGenerateTask,
   ChangedFile
 } from "@atlas/shared";
@@ -34,6 +35,7 @@ import {
   buildScreenGeneratePrompt,
   buildEntityDerivePrompt,
   buildFeatureGeneratePrompt,
+  buildUseCaseGeneratePrompt,
   buildConventionsGeneratePrompt
 } from "./generatePromptBuilder";
 import { restoreFromBackups, clearBackups } from "./changesetTracker";
@@ -77,6 +79,7 @@ type InternalTask =
   | (EntityReviseTask & { payload: BatchPayload })
   | (EntityDeriveTask & { payload: BatchPayload })
   | (FeatureGenerateTask & { payload: BatchPayload })
+  | (UseCaseGenerateTask & { payload: BatchPayload })
   | (ConventionsGenerateTask & { payload: BatchPayload });
 
 const tasks: InternalTask[] = [];
@@ -229,6 +232,9 @@ async function runOne(t: InternalTask): Promise<void> {
       case "feature-generate":
         await runBatchRevise(t, buildFeatureGeneratePrompt);
         return;
+      case "usecase-generate":
+        await runBatchRevise(t, buildUseCaseGeneratePrompt);
+        return;
       case "conventions-generate":
         await runBatchRevise(t, buildConventionsGeneratePrompt);
         return;
@@ -323,6 +329,7 @@ type BatchTask =
   | (EntityReviseTask & { payload: BatchPayload })
   | (EntityDeriveTask & { payload: BatchPayload })
   | (FeatureGenerateTask & { payload: BatchPayload })
+  | (UseCaseGenerateTask & { payload: BatchPayload })
   | (ConventionsGenerateTask & { payload: BatchPayload });
 
 type PromptBuilder = (productId: string) => Promise<{ prompt: string }>;
@@ -752,6 +759,7 @@ function batchTaskTitle(kind: Exclude<TaskKind, "feature-refine">): string {
     case "entity-revise": return "Revise entities (batch)";
     case "entity-derive": return "Derive entities (batch)";
     case "feature-generate": return "Generate features (batch)";
+    case "usecase-generate": return "Generate use cases (batch)";
     case "conventions-generate": return "Generate conventions (batch)";
   }
 }
