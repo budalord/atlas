@@ -109,7 +109,14 @@ export function EntityTab({ productId, readOnly = false }: EntityTabProps) {
         <AgentTaskTriggers
           className="px-5 pb-2"
           productId={productId}
-          triggers={[{ label: "更新实体", kinds: ["entity-derive", "entity-revise"] }]}
+          triggers={[
+            {
+              label: "更新实体",
+              kinds: ["entity-derive", "entity-revise"],
+              disabled: entitiesData.exists && !entitiesData.stale,
+              disabledHint: "功能点等来源无更新,实体无需重派生"
+            }
+          ]}
         />
       ) : null}
 

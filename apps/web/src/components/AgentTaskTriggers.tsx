@@ -7,6 +7,10 @@ type BatchKind = Exclude<TaskKind, "feature-refine">;
 export interface AgentTrigger {
   label: string;
   kinds: ReadonlyArray<BatchKind>;
+  /** 外部门控: true 时按钮置灰不可点(如下游无更新 / 无待处理项) */
+  disabled?: boolean;
+  /** disabled 时的悬浮提示, 说明为什么点不了 */
+  disabledHint?: string;
 }
 
 interface AgentTaskTriggersProps {
@@ -51,10 +55,11 @@ export function AgentTaskTriggers({ productId, triggers, className }: AgentTaskT
       <div className="flex flex-wrap gap-1.5">
         {triggers.map((t) => (
           <button
-            className="rounded border border-indigo-300 bg-white px-2.5 py-1 text-[11px] font-medium text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-50"
-            disabled={runBusy}
+            className="rounded border border-indigo-300 bg-white px-2.5 py-1 text-[11px] font-medium text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={runBusy || t.disabled}
             key={t.label}
             onClick={() => fire(t.kinds)}
+            title={t.disabled ? t.disabledHint : undefined}
             type="button"
           >
             {t.label}

@@ -10,6 +10,7 @@ import {
 import { loadCapabilities } from "../services/capabilityLoader";
 import { loadUseCases } from "../services/usecaseLoader";
 import { loadModules, loadFeatures } from "../services/entityLoader";
+import { parseGlobalFeedbackFile } from "../services/globalFeedbackParser";
 import { bumpDataVersion, getDataVersion } from "../services/watcher";
 
 const ID_RE = /^[a-z][a-z0-9-]*$/;
@@ -37,7 +38,11 @@ actorsRouter.get("/", async (req: Request<{ id: string }>, res, next) => {
       functions.push(...fs);
     }
     const withRefs = attachActorRefs(actors, capabilities, functions, usecases);
-    res.json({ data: withRefs, version: getDataVersion() });
+    // actor-revise 由全局需求池(entity 段复用为 actor 决策容器)驱动;池空 = 无待处理项,
+    // 前端据此置灰「更新角色」按钮(actor 没有自己的反馈池)。
+    const globalPool = await parseGlobalFeedbackFile(productId);
+    const pendingWork = globalPool.entity.length > 0;
+    res.json({ data: withRefs, pendingWork, version: getDataVersion() });
   } catch (error) {
     next(error);
   }

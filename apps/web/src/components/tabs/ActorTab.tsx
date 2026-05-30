@@ -48,6 +48,7 @@ export function ActorTab({ productId, readOnly = false }: ActorTabProps) {
   const [modules, setModules] = useState<ModuleWithFeatures[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [actorWorkPending, setActorWorkPending] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -65,6 +66,7 @@ export function ActorTab({ productId, readOnly = false }: ActorTabProps) {
       const uJson = uRes.ok ? ((await uRes.json()) as ApiEnvelope<UseCase[]>) : null;
       const mJson = mRes.ok ? ((await mRes.json()) as ApiEnvelope<ModuleWithFeatures[]>) : null;
       setActors(aJson.data);
+      setActorWorkPending(Boolean((aJson as { pendingWork?: boolean }).pendingWork));
       setCapabilities(cJson?.data ?? []);
       setEntities(eJson?.data ?? []);
       setUsecases(uJson?.data ?? []);
@@ -149,7 +151,15 @@ export function ActorTab({ productId, readOnly = false }: ActorTabProps) {
         <div className="flex items-center justify-end border-b border-slate-200 bg-slate-50 px-5 py-1.5">
           <AgentTaskTriggers
             productId={productId}
-            triggers={[{ label: "更新角色", kinds: ["actor-revise"] }]}
+            triggers={[
+              {
+                label: "更新角色",
+                kinds: ["actor-revise"],
+                disabled: !actorWorkPending,
+                disabledHint:
+                  "角色没有反馈池,只由全局需求池驱动;池中无 actor 相关条目时无需更新"
+              }
+            ]}
           />
         </div>
       ) : null}
