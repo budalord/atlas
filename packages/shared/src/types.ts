@@ -648,6 +648,26 @@ export interface IASnapshot {
   modules: IAModuleNode[];
 }
 
+/** IA 两版之间的一条结构差异。 */
+export interface IADiffEntry {
+  level: "module" | "group" | "screen";
+  change: "added" | "removed" | "renamed" | "moved";
+  /** 受影响实体 id。 */
+  id: string;
+  /** 定位路径, 如 "academic" / "academic/score" / "academic/score/score-entry"。 */
+  path: string;
+  /** 人读说明, 如 "renamed: 旧名 → 新名" / "moved: score → entitlement"。 */
+  detail: string;
+}
+
+/** 冻结版 IA vs 新组装 IA 的结构差异(IA 审核闸的输入)。 */
+export interface IADiff {
+  from: string; // 旧 version
+  to: string;   // 新 version
+  changed: boolean;
+  entries: IADiffEntry[];
+}
+
 /**
  * 五层骨架的引用完整性 lint 结果 (l0Linter 规则 6 输出)。
  */
