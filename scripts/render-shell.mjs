@@ -33,12 +33,14 @@ if (!productDirArg || !screenId) die("用法: node scripts/render-shell.mjs <pro
 const productDir = resolve(productDirArg);
 const shellDir   = join(productDir, "shells", SHELL_VER);
 const shellPath  = join(shellDir, "shell.html");
+const iaPath     = join(shellDir, "IA.json");
 const contentPath = join(shellDir, "content", `${screenId}.html`);
 const outDir     = join(shellDir, "out");
 const outHtml    = join(outDir, `${screenId}.html`);
 const outPng     = join(outDir, `${screenId}.png`);
 
-if (!existsSync(shellPath))   die(`找不到冻结壳: ${shellPath}`);
+if (!existsSync(shellPath))   die(`找不到壳模板: ${shellPath}`);
+if (!existsSync(iaPath))      die(`找不到 IA.json: ${iaPath} (先跑 npx tsx scripts/gen-ia.mts <id>)`);
 if (!existsSync(contentPath)) die(`找不到内容区: ${contentPath} (需先由生成器产出)`);
 if (!existsSync(CHROME))      die(`找不到 Chrome: ${CHROME}`);
 
@@ -62,7 +64,33 @@ const groupId  = grab("group_id");
 if (!moduleId) die(`${screenId} 缺 module 字段`);
 if (!groupId)  die(`${screenId} 缺 group_id 字段 (Step 2 应已补)`);
 
-// ── 拼装: 壳 + 内容 + 高亮位 ──────────────────────────────────────────
+// ── 从 IA.json(真源组装)生成导航树 HTML ─────────────────────────────
+//   结构必须匹配 shell.html 的 CSS / 高亮脚本: .nav-module[data-module] >
+//   .nav-groups > .nav-group[data-group] > .nav-items > .nav-item[data-screen]。
+//   空组(无 screen)跳过; 模块头总渲染(即便暂无 screen, 也要露出该模块)。
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+function buildNav(ia) {
+  return ia.modules.map((m) => {
+    const groups = (m.groups || []).filter((g) => g.screens && g.screens.length > 0);
+    const groupsHtml = groups.map((g) => {
+      const items = g.screens
+        .map((s) => `      <div class="nav-item" data-screen="${esc(s.id)}">${esc(s.name)}</div>`)
+        .join("\n");
+      return `    <div class="nav-group" data-group="${esc(g.id)}"><span class="arr">›</span>${esc(g.name)}</div>\n` +
+             `    <div class="nav-items">\n${items}\n    </div>`;
+    }).join("\n\n");
+    return `  <!-- ${esc(m.name)}  order=${m.order ?? ""} -->\n` +
+           `  <div class="nav-module" data-module="${esc(m.id)}" data-color="${esc(m.color || "gray")}">\n` +
+           `    <div class="dot"></div>${esc(m.name)}\n  </div>\n` +
+           `  <div class="nav-groups">\n${groupsHtml}\n  </div>`;
+  }).join("\n\n");
+}
+
+const ia = JSON.parse(await readFile(iaPath, "utf8"));
+const navHtml = buildNav(ia);
+
+// ── 拼装: 壳 + nav + 内容 + 高亮位 ────────────────────────────────────
 const shell   = await readFile(shellPath, "utf8");
 const content = await readFile(contentPath, "utf8");
 
@@ -70,7 +98,9 @@ const assembled = shell
   .replaceAll("{{MODULE}}", moduleId)
   .replaceAll("{{GROUP}}", groupId)
   .replaceAll("{{SCREEN}}", screenId)
-  .replace("{{CONTENT}}", content);   // 内容含 $ 等字符，用单次 replace 避免 $& 误解析
+  // nav / content 用函数替换: 字符串替换会把 $& / $' 当反向引用解析, 函数形式才真正逐字插入
+  .replace("{{NAV_MODULES}}", () => navHtml)
+  .replace("{{CONTENT}}", () => content);
 
 const leftover = assembled.match(/\{\{[A-Z_]+\}\}/g);
 if (leftover) die(`仍有未替换的注入点: ${[...new Set(leftover)].join(", ")}`);
