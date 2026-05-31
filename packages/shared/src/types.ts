@@ -603,6 +603,51 @@ export interface ScreenValidationIssue {
   detail: string;
 }
 
+// ─── 全局壳 IA(信息架构 / 导航树)─────────────────────────────────
+// 机器可读的导航树快照, 从真源(MODULE.md groups + screen.group_id)组装。
+// shell 渲染 / 版本化 / IA 审核闸的输入。手写 IA.md 仅为人读设计稿, 非真源。
+
+/** 导航叶子: 指向一个 screen。 */
+export interface IAScreenRef {
+  id: string;
+  name: string;
+}
+
+/** 导航中层: 管理模块(group), 桶内是归属本 group 的 screens。 */
+export interface IAGroup {
+  id: string;
+  name: string;
+  order?: number;
+  screens: IAScreenRef[];
+}
+
+/** 导航顶层: 业务模块, 含其声明的 groups(已归桶)+ 兜底未分组。 */
+export interface IAModuleNode {
+  id: string;
+  name: string;
+  color?: ModuleColor;
+  order?: number;
+  role?: string;
+  /** MODULE.md 声明的 groups, 按声明顺序; screens 已按 group_id 归桶。 */
+  groups: IAGroup[];
+  /** group_id 缺省或不在声明内的 screens(导航兜底位)。 */
+  ungrouped: IAScreenRef[];
+}
+
+/** 全局壳的 IA 快照(一个产品一棵导航树)。 */
+export interface IASnapshot {
+  shell_id: string;
+  /** v1, v2, … — MODULE.md/group 变更后 bump。 */
+  version: string;
+  status: "draft" | "frozen";
+  /** 组装时间戳(ISO), 由生成器注入。 */
+  generated_at: string;
+  /** 产品 id。 */
+  product: string;
+  /** 按 module.order 排序的导航树。 */
+  modules: IAModuleNode[];
+}
+
 /**
  * 五层骨架的引用完整性 lint 结果 (l0Linter 规则 6 输出)。
  */
