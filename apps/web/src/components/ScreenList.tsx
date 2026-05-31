@@ -318,7 +318,7 @@ export function ScreenList({ productId, readOnly = false }: ScreenListProps) {
                   </button>
                   {detail.needs_prototype ? (
                     <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-800">
-                      待出图队列中 · 等 codex 客户端出图
+                      待渲染队列中 · 等 Atlas 拼壳渲染(render-and-submit)
                     </span>
                   ) : detail.pending_prototype ? (
                     <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] text-violet-800">
