@@ -21,6 +21,7 @@ import {
   setNeedsPrototype
 } from "../services/prototypeQueue";
 import { bumpDataVersion, getDataVersion } from "../services/watcher";
+import { renderAndSubmitScreen, drainRenderQueue, RenderError } from "../services/screenRenderer";
 
 const ID_RE = /^[a-z][a-z0-9-]*$/;
 
@@ -258,6 +259,52 @@ screensRouter.post(
         version: getDataVersion()
       });
     } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
+ * POST /:module/:screenId/render-prototype — Atlas 后端**立即渲染**该屏(壳+内容→PNG)
+ * 并喂进三态闸(pending_prototype)。这是"待渲染队列"的消费者(取代已砍的 codex drain)。
+ */
+screensRouter.post(
+  "/:module/:screenId/render-prototype",
+  async (req: Request<{ id: string; module: string; screenId: string }>, res, next) => {
+    try {
+      const productId = req.params.id;
+      const result = await renderAndSubmitScreen(productId, req.params.module, req.params.screenId);
+      bumpDataVersion(
+        `products/${productId}/modules/${req.params.module}/screens/${req.params.screenId}.md`
+      );
+      res.json({ data: result, version: getDataVersion() });
+    } catch (error) {
+      if (error instanceof RenderError) {
+        res.status(error.httpStatus).json({ error: error.message });
+        return;
+      }
+      next(error);
+    }
+  }
+);
+
+/**
+ * POST /render-queue — 抽干待渲染队列: 渲染所有 needs_prototype 的屏 → pending_prototype。
+ * 同步渲染(headless Chrome 逐屏 ~1–2s), 队列大时耗时随屏数线性增长。
+ */
+screensRouter.post(
+  "/render-queue",
+  async (req: Request<{ id: string }>, res, next) => {
+    try {
+      const productId = req.params.id;
+      const results = await drainRenderQueue(productId);
+      bumpDataVersion(`products/${productId}/render-queue-drained`);
+      res.json({ data: { rendered: results.length, results }, version: getDataVersion() });
+    } catch (error) {
+      if (error instanceof RenderError) {
+        res.status(error.httpStatus).json({ error: error.message });
+        return;
+      }
       next(error);
     }
   }

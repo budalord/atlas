@@ -1,4 +1,4 @@
-import { MonitorCog, ChevronDown } from "lucide-react";
+import { MonitorCog, ChevronDown, Play, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useDataChange } from "../lib/useDataChange";
 import type { ApiEnvelope, Screen } from "../types";
@@ -19,6 +19,8 @@ export function RenderQueueMonitor({ productId }: { productId: string }) {
   const [pending, setPending] = useState<Row[]>([]);
   const [open, setOpen] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [draining, setDraining] = useState(false);
+  const [drainMsg, setDrainMsg] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -40,6 +42,23 @@ export function RenderQueueMonitor({ productId }: { productId: string }) {
   useDataChange(() => {
     void load();
   });
+
+  const drain = useCallback(async () => {
+    if (draining) return;
+    setDraining(true);
+    setDrainMsg(null);
+    try {
+      const res = await fetch(`/api/products/${productId}/screens/render-queue`, { method: "POST" });
+      const body = (await res.json().catch(() => ({}))) as { data?: { rendered: number }; error?: string };
+      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+      setDrainMsg(`已渲染 ${body.data?.rendered ?? 0} 屏 → 待审`);
+      await load();
+    } catch (e) {
+      setDrainMsg(e instanceof Error ? e.message : "渲染失败");
+    } finally {
+      setDraining(false);
+    }
+  }, [draining, productId, load]);
 
   const chip = (n: number, tone: string) =>
     `inline-flex min-w-[18px] items-center justify-center rounded px-1 text-[11px] font-semibold ${tone}`;
@@ -73,9 +92,23 @@ export function RenderQueueMonitor({ productId }: { productId: string }) {
         <div className="absolute left-0 top-full z-20 mt-1 w-80 rounded-md border border-slate-200 bg-white p-3 text-xs shadow-lg">
           {err ? <div className="mb-2 text-red-600">加载失败: {err}</div> : null}
 
-          <div className="mb-1 flex items-center gap-1.5 font-semibold text-amber-800">
-            <span className="h-2 w-2 rounded-full bg-amber-400" /> 待渲染队列 · {needs.length}
+          <div className="mb-1 flex items-center justify-between">
+            <div className="flex items-center gap-1.5 font-semibold text-amber-800">
+              <span className="h-2 w-2 rounded-full bg-amber-400" /> 待渲染队列 · {needs.length}
+            </div>
+            {needs.length > 0 ? (
+              <button
+                type="button"
+                onClick={drain}
+                disabled={draining}
+                className="inline-flex items-center gap-1 rounded bg-slate-950 px-2 py-1 text-[11px] font-medium text-white transition hover:bg-slate-800 disabled:opacity-60"
+              >
+                {draining ? <Loader2 size={11} className="animate-spin" /> : <Play size={11} />}
+                {draining ? "渲染中…" : "渲染全部待出图"}
+              </button>
+            ) : null}
           </div>
+          {drainMsg ? <div className="mb-1.5 text-[11px] text-emerald-700">{drainMsg}</div> : null}
           {needs.length === 0 ? (
             <div className="mb-3 pl-3.5 text-slate-400">(空)</div>
           ) : (
