@@ -41,6 +41,9 @@
 id: student-profile               # kebab-case, 与文件名一致, module 内唯一
 name: 学员档案页                  # 人类可读名称
 module: shared                    # module id 或 "shared"(跨模块共享屏)
+group_id: student-profile         # 选填; 归属的管理模块(三层中层 group)id。
+                                  #   module 在 MODULE.md 声明了 groups 时必须 ∈ 其中一项,
+                                  #   全局壳 IA 按此键把 screen 归桶到导航叶子。缺省归兜底未分组。
 usecase_ids:                      # 必填至少 1; 真源, usecase 不存反查
   - douyin-enrollment
   - offline-enrollment
@@ -131,6 +134,7 @@ split_suggestion: |               # agent revise / generate 时若发现该屏�
 
 | 字段 | 默认 | 说明 |
 |------|------|------|
+| `group_id` | (无) | 归属管理模块(三层中层 group)id, kebab-case。module 在 MODULE.md 声明 `groups` 时必须 ∈ 其中一项; 全局壳 IA 按此键归桶。缺省归兜底未分组 |
 | `prototype_url` | null | Figma / 外链原型图 |
 | `preview_image` | null | 静态预览图(png/jpg)相对路径或 url |
 | `added_in_phase` | 不存在 | 创建时所处 phase, 用于"进行中追加项" banner |
@@ -217,6 +221,7 @@ POST/PATCH 校验:
 | `usecase-not-found` | usecase_ids 引用了不存在的 usecase |
 | `entity-not-referenced-by-usecase` | entity_visibility 引用了不存在的 entity, 或该 entity 未被 usecase_ids 中任何 usecase 的 entity_ids 引用 |
 | `field-not-in-entity-fields-table` | default / role_gated / derived_fields 中的字段名不在 entity `## 字段` markdown 表 |
+| `group-id-not-in-module` | group_id 非合法 kebab-case, 或所属 module 声明了 groups 但 group_id 不在其中(照搬"字段名锁死") |
 
 ### 6.2 视图级(暴露不阻断)
 
@@ -224,6 +229,7 @@ POST/PATCH 校验:
 |------|----------|----------|
 | `orphan-screen` | usecase_ids 全部找不到对应 usecase | `GET /api/products/:id/screens/orphans` |
 | `field-not-in-entity-fields-table`(warning) | `derived_fields` 中的字段在 entity 字段表存在但未标 derived | validation_issues 中 level=warning |
+| `group-id-missing`(warning) | module 声明了 groups 但本 screen 未挂 group_id(导航归兜底未分组) | validation_issues 中 level=warning |
 
 ---
 

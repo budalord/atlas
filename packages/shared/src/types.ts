@@ -545,6 +545,12 @@ export interface Screen {
   id: string;                       // kebab-case, module 内唯一
   name: string;                     // 人类可读
   module: string;                   // module id 或 "shared"(跨模块共享屏)
+  /**
+   * 归属的管理模块(三层中层 group)id, kebab-case。
+   * 若所属 module 在 MODULE.md 声明了 `groups`, 必须 ∈ 其中一项 id(校验阻断)。
+   * 全局壳 IA 按此键把 screen 归桶到导航树叶子; 缺省则归入兜底未分组。
+   */
+  group_id?: string;
   usecase_ids: string[];            // 必填至少 1; 单向真源, usecase 不存反查
   /** 字段可见性矩阵: entityName → ScreenEntityVisibility */
   entity_visibility: Record<string, ScreenEntityVisibility>;
@@ -591,7 +597,9 @@ export interface ScreenValidationIssue {
     | "usecase-not-found"
     | "entity-not-referenced-by-usecase"
     | "field-not-in-entity-fields-table"
-    | "orphan-screen";
+    | "orphan-screen"
+    | "group-id-not-in-module"
+    | "group-id-missing";
   detail: string;
 }
 

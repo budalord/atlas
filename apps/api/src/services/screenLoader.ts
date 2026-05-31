@@ -29,6 +29,7 @@ interface ScreenFrontmatter {
   id?: unknown;
   name?: unknown;
   module?: unknown;
+  group_id?: unknown;
   usecase_ids?: unknown;
   entity_visibility?: unknown;
   prototype_url?: unknown;
@@ -128,6 +129,9 @@ export function parseScreen(
   const module = typeof fm.module === "string" && fm.module.trim().length > 0
     ? fm.module.trim()
     : moduleName;
+  const group_id = typeof fm.group_id === "string" && fm.group_id.trim().length > 0
+    ? fm.group_id.trim()
+    : undefined;
 
   const usecase_ids_raw = fm.usecase_ids;
   const usecase_ids = Array.isArray(usecase_ids_raw)
@@ -164,6 +168,7 @@ export function parseScreen(
     id,
     name,
     module,
+    ...(group_id ? { group_id } : {}),
     usecase_ids,
     entity_visibility,
     ...(prototype_url ? { prototype_url } : {}),
@@ -219,6 +224,7 @@ export async function writeScreen(productId: string, screen: Screen): Promise<vo
     id: screen.id,
     name: screen.name,
     module: screen.module,
+    ...(screen.group_id ? { group_id: screen.group_id } : {}),
     usecase_ids: screen.usecase_ids,
     entity_visibility: serializeEntityVisibility(screen.entity_visibility)
   };
@@ -303,6 +309,46 @@ export async function validateScreen(
       });
     } else {
       myUseCases.push(uc);
+    }
+  }
+
+  // 1b. group_id: 若所属 module 声明了 groups, 必须 ∈ groups[].id(照搬"字段名锁死")。
+  //     格式非法 / 不在声明内 → 阻断; module 有 groups 但 screen 未挂 → 警告(归兜底未分组)。
+  if (screen.group_id !== undefined && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(screen.group_id)) {
+    issues.push({
+      level: "error",
+      screenId: screen.id,
+      module: screen.module,
+      rule: "group-id-not-in-module",
+      detail: `group_id \`${screen.group_id}\` 不是合法 kebab-case`
+    });
+  }
+  if (screen.module !== "shared") {
+    try {
+      const mods = await loadModules(productId);
+      const myMod = mods.find((m) => m.name === screen.module || m.id === screen.module);
+      const declared = myMod?.groups ?? [];
+      if (declared.length > 0) {
+        if (screen.group_id === undefined) {
+          issues.push({
+            level: "warning",
+            screenId: screen.id,
+            module: screen.module,
+            rule: "group-id-missing",
+            detail: `module ${screen.module} 声明了 groups, 但本 screen 未挂 group_id(导航将归入兜底未分组)`
+          });
+        } else if (!declared.some((g) => g.id === screen.group_id)) {
+          issues.push({
+            level: "error",
+            screenId: screen.id,
+            module: screen.module,
+            rule: "group-id-not-in-module",
+            detail: `group_id \`${screen.group_id}\` 不在 module ${screen.module} 的 MODULE.md groups 内: [${declared.map((g) => g.id).join(", ")}]`
+          });
+        }
+      }
+    } catch {
+      /* modules 加载失败 — 跳过 group 校验, 不阻断 */
     }
   }
 
