@@ -18,6 +18,8 @@ import { DATA_ROOT, dataPath } from "./fileReader";
 import { buildIASnapshot, writeIASnapshot } from "./iaBuilder";
 import { loadScreen, loadScreens } from "./screenLoader";
 import { submitPrototype } from "./prototypeQueue";
+import { ensureRealContent, isStubOrMissing } from "./screenContentGen";
+import { bumpDataVersion } from "./watcher";
 
 const atlasRoot = path.resolve(DATA_ROOT, "..");
 const SHELL_VER = "v1";
@@ -75,32 +77,52 @@ async function ensureIA(productId: string): Promise<void> {
   await writeIASnapshot(productId, snap, SHELL_VER);
 }
 
-/** 确保内容区存在(缺则从真源生成桩)。返回 true=新建了桩。 */
-async function ensureContent(productId: string, moduleName: string, screenId: string): Promise<boolean> {
+/** 兜底写桩(仅生成失败且文件不存在时用)。 */
+async function writeStubFallback(productId: string, moduleName: string, screenId: string): Promise<void> {
   const contentPath = dataPath("products", productId, "shells", SHELL_VER, "content", `${screenId}.html`);
-  if (existsSync(contentPath)) return false;
+  if (existsSync(contentPath)) return;
   const screen = await loadScreen(productId, moduleName, screenId);
   if (!screen) throw new RenderError(`screen 不存在: ${moduleName}/${screenId}`, 404);
   await fs.mkdir(path.dirname(contentPath), { recursive: true });
   await fs.writeFile(contentPath, stubContent(screen), "utf8");
-  return true;
 }
 
+export type ContentMode = "existing-real" | "generated-real" | "stub";
 export interface RenderResult {
   module: string;
   screenId: string;
   pending_prototype: string;
-  stubbed: boolean;
+  content: ContentMode;
 }
 
-/** 渲染单屏(壳+内容→PNG)并喂进三态闸。 */
+/**
+ * 渲染单屏并喂进三态闸。内容区: 已有真内容直接用; 桩/缺失则先 spawn claude 生成真内容
+ * (opts.fill=false 时跳过生成直接垫桩); 生成失败兜底桩 —— 流程不中断。
+ */
 export async function renderAndSubmitScreen(
   productId: string,
   moduleName: string,
-  screenId: string
+  screenId: string,
+  opts: { fill?: boolean } = {}
 ): Promise<RenderResult> {
   await ensureIA(productId);
-  const stubbed = await ensureContent(productId, moduleName, screenId);
+
+  const contentPath = dataPath("products", productId, "shells", SHELL_VER, "content", `${screenId}.html`);
+  let content: ContentMode = "existing-real";
+  if (isStubOrMissing(contentPath)) {
+    if (opts.fill === false) {
+      await writeStubFallback(productId, moduleName, screenId);
+      content = "stub";
+    } else {
+      const real = await ensureRealContent(productId, moduleName, screenId); // spawn claude
+      if (real) {
+        content = "generated-real";
+      } else {
+        await writeStubFallback(productId, moduleName, screenId);
+        content = "stub";
+      }
+    }
+  }
 
   const productDir = dataPath("products", productId);
   const script = path.join(atlasRoot, "scripts", "render-shell.mjs");
@@ -112,16 +134,51 @@ export async function renderAndSubmitScreen(
   }
 
   const { pending_prototype } = await submitPrototype({ productId, moduleName, screenId, imagePath: outPng });
-  return { module: moduleName, screenId, pending_prototype, stubbed };
+  return { module: moduleName, screenId, pending_prototype, content };
 }
 
-/** 抽干待渲染队列: 渲染所有 needs_prototype 的屏并提交。返回每屏结果。 */
-export async function drainRenderQueue(productId: string): Promise<RenderResult[]> {
+// ── 异步抽干待渲染队列(claude 生成内容每屏 ~1-2min, 不能阻塞 HTTP) ──────
+interface DrainState {
+  running: boolean;
+  productId: string | null;
+  total: number;
+  done: number;
+  current: string | null;
+  errors: string[];
+}
+const drainState: DrainState = { running: false, productId: null, total: 0, done: 0, current: null, errors: [] };
+
+export function getDrainStatus(): DrainState {
+  return { ...drainState };
+}
+
+/** 启动后台抽干: 立即返回; 逐屏 生成内容+渲染+提交, 每屏完成 bump 数据版本(监控自动刷新)。 */
+export async function startDrainRenderQueue(
+  productId: string
+): Promise<{ started: number; alreadyRunning: boolean }> {
+  if (drainState.running) return { started: 0, alreadyRunning: true };
   const screens = await loadScreens(productId);
   const queued = screens.filter((s) => s.needs_prototype);
-  const out: RenderResult[] = [];
-  for (const s of queued) {
-    out.push(await renderAndSubmitScreen(productId, s.module, s.id));
-  }
-  return out;
+  if (queued.length === 0) return { started: 0, alreadyRunning: false };
+
+  Object.assign(drainState, { running: true, productId, total: queued.length, done: 0, current: null, errors: [] });
+
+  // 后台跑(不 await), 让 HTTP 立刻返回
+  void (async () => {
+    for (const s of queued) {
+      drainState.current = `${s.module}/${s.id}`;
+      try {
+        await renderAndSubmitScreen(productId, s.module, s.id);
+      } catch (e) {
+        drainState.errors.push(`${s.module}/${s.id}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      drainState.done += 1;
+      bumpDataVersion(`products/${productId}/render-drain-progress`);
+    }
+    drainState.running = false;
+    drainState.current = null;
+    bumpDataVersion(`products/${productId}/render-drain-done`);
+  })();
+
+  return { started: queued.length, alreadyRunning: false };
 }

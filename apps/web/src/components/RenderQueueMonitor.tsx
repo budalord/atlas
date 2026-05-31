@@ -47,12 +47,23 @@ export function RenderQueueMonitor({ productId }: { productId: string }) {
     if (draining) return;
     setDraining(true);
     setDrainMsg(null);
+    const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
     try {
       const res = await fetch(`/api/products/${productId}/screens/render-queue`, { method: "POST" });
-      const body = (await res.json().catch(() => ({}))) as { data?: { rendered: number }; error?: string };
+      const body = (await res.json().catch(() => ({}))) as { data?: { started: number; alreadyRunning: boolean }; error?: string };
       if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
-      setDrainMsg(`已渲染 ${body.data?.rendered ?? 0} 屏 → 待审`);
-      await load();
+      if (body.data?.alreadyRunning) { setDrainMsg("已有渲染任务在跑…"); }
+      else if (!body.data?.started) { setDrainMsg("队列为空"); setDraining(false); return; }
+      // 后台异步(每屏 spawn claude 填内容 ~1-2min), 轮询进度
+      for (let i = 0; i < 400; i++) {
+        await sleep(4000);
+        const st = await fetch(`/api/products/${productId}/screens/render-queue-status`).then((r) => r.json()).catch(() => null);
+        const d = st?.data as { running: boolean; total: number; done: number; current: string | null; errors: string[] } | undefined;
+        if (!d) continue;
+        setDrainMsg(d.running ? `生成+渲染中 ${d.done}/${d.total} · ${d.current ?? ""}` : `完成 ${d.done}/${d.total}${d.errors.length ? ` · ${d.errors.length} 失败` : ""}`);
+        await load();
+        if (!d.running) break;
+      }
     } catch (e) {
       setDrainMsg(e instanceof Error ? e.message : "渲染失败");
     } finally {
@@ -104,7 +115,7 @@ export function RenderQueueMonitor({ productId }: { productId: string }) {
                 className="inline-flex items-center gap-1 rounded bg-slate-950 px-2 py-1 text-[11px] font-medium text-white transition hover:bg-slate-800 disabled:opacity-60"
               >
                 {draining ? <Loader2 size={11} className="animate-spin" /> : <Play size={11} />}
-                {draining ? "渲染中…" : "渲染全部待出图"}
+                {draining ? "处理中…" : "生成内容并出图"}
               </button>
             ) : null}
           </div>
@@ -137,8 +148,8 @@ export function RenderQueueMonitor({ productId }: { productId: string }) {
           )}
 
           <div className="mt-2 border-t border-slate-100 pt-2 text-[10px] leading-relaxed text-slate-400">
-            出图由 Atlas/Claude 用冻结壳渲染收口(render-and-submit),不再走 codex。
-            「重新出图」只把屏标入待渲染队列。
+            点「生成内容并出图」: 后端逐屏自动生成内容(没真内容的 spawn Claude 填,有的直接用)
+            → 冻结壳渲染 → 进待审。每屏约 1–2 分钟, 后台跑可关面板。
           </div>
         </div>
       ) : null}

@@ -21,7 +21,7 @@ import {
   setNeedsPrototype
 } from "../services/prototypeQueue";
 import { bumpDataVersion, getDataVersion } from "../services/watcher";
-import { renderAndSubmitScreen, drainRenderQueue, RenderError } from "../services/screenRenderer";
+import { renderAndSubmitScreen, startDrainRenderQueue, getDrainStatus, RenderError } from "../services/screenRenderer";
 
 const ID_RE = /^[a-z][a-z0-9-]*$/;
 
@@ -289,17 +289,17 @@ screensRouter.post(
 );
 
 /**
- * POST /render-queue — 抽干待渲染队列: 渲染所有 needs_prototype 的屏 → pending_prototype。
- * 同步渲染(headless Chrome 逐屏 ~1–2s), 队列大时耗时随屏数线性增长。
+ * POST /render-queue — 启动后台抽干: 逐屏 生成真内容(spawn claude)+ 渲染 + 提交 → 待审。
+ * **立即返回**(每屏 ~1-2min, 后台跑); 进度经 bump 数据版本让监控自动刷新, 或 GET .../render-queue/status。
  */
 screensRouter.post(
   "/render-queue",
   async (req: Request<{ id: string }>, res, next) => {
     try {
       const productId = req.params.id;
-      const results = await drainRenderQueue(productId);
-      bumpDataVersion(`products/${productId}/render-queue-drained`);
-      res.json({ data: { rendered: results.length, results }, version: getDataVersion() });
+      const result = await startDrainRenderQueue(productId);
+      bumpDataVersion(`products/${productId}/render-queue-started`);
+      res.json({ data: result, version: getDataVersion() });
     } catch (error) {
       if (error instanceof RenderError) {
         res.status(error.httpStatus).json({ error: error.message });
@@ -309,6 +309,11 @@ screensRouter.post(
     }
   }
 );
+
+/** GET /render-queue-status — 后台抽干进度(running / total / done / current / errors)。 */
+screensRouter.get("/render-queue-status", (_req: Request<{ id: string }>, res) => {
+  res.json({ data: getDrainStatus(), version: getDataVersion() });
+});
 
 /**
  * GET /:module/:screenId/pending-image — 返回该屏【待审暂存】原型图字节(审核时看)。
