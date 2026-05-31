@@ -25,7 +25,8 @@ export type GenerateScope =
   | "conventions"
   | "prototype"
   | "entity-derive"
-  | "screen";
+  | "screen"
+  | "concept-reference";
 
 export interface GenerateResult {
   prompt: string;
@@ -1105,4 +1106,56 @@ ${coveredLines.length === 0 ? "(无)" : coveredLines.join("\n")}
  */
 export async function buildPrototypeGeneratePrompt(productId: string): Promise<GenerateResult> {
   return buildScreenGeneratePrompt(productId);
+}
+
+/**
+ * 概念参考图 Generate prompt (concept-reference)。
+ *
+ * 用途要点: codex **不再产出生产原型**, 只产 3–4 张概念参考图(mood board)给 Atlas 吸收。
+ * 每页的生产图由 Atlas 自己用冻结壳 + 内容区渲染(见 scripts/render-shell.mjs), codex 的随机性因此无害化
+ * (参考图本就该多样, 一张都不上线)。提示词内含保存绝对路径, codex 客户端落图后 Atlas 读取参考。
+ */
+export async function buildConceptReferencePrompt(productId: string): Promise<GenerateResult> {
+  const meta = await loadMeta(productId);
+  const stats = await collectStats(productId);
+  const modules = await loadModules(productId);
+  const conceptsDir = path.join(atlasRoot, "data", "products", productId, "shells", "v1", "concepts");
+  const dirList = modules.length
+    ? modules.map((m) => `- ${m.title || m.name}${m.role ? `(${m.role})` : ""}`).join("\n")
+    : "- (模块待补)";
+
+  const prompt = [
+    await header(meta, productId, "概念参考图"),
+    `## 角色
+你是资深 B 端 SaaS 视觉设计师, 为「${meta?.name ?? productId}」产出**概念参考图**。
+
+## 用途(关键 — 决定你怎么画)
+这些图是**设计参考(mood board), 不是要交付的生产原型**。研发侧已有固定前端壳(左侧导航 196px + 内容区), 会照你的视觉方向自行实现每一页。所以:
+- 只产出 **3–4 张**高质量概念图, 覆盖几种页面原型, 把视觉语言立住即可。
+- **不要画全部页面**; 各张**不必互相一致** —— 每张各展所长, 由我综合吸收。
+- 重点给: 配色、留白密度、卡片/表格/表单的组件质感、状态徽章、图标风格、数据可视化点缀。
+
+## 产品的业务方向(供取材, 别逐一画全)
+${dirList}
+
+## 画布与结构约束(让概念能被直接吸收)
+- 1440×900, 浅色主题; 左侧固定深色侧边栏 196px, 顶部面包屑条, 右侧主内容区。
+- 主内容区可含: 标题行、筛选/操作栏、主体(表格/表单/卡片)、可选右侧栏、底部操作条。
+
+## 要画的原型(从下面挑 3–4 个, 用本产品的真实场景)
+1. **数据监控/列表页** — 表格 + 状态徽章 + 顶部统计概览 + 筛选
+2. **表单/申请页** — 表单 + 上下文摘要 + 审批流提示
+3. **详情页** — 摘要头 + 多区块字段 + 右侧栏摘要
+4.(可选)**排课/日历 或 仪表盘页** — 网格 / 数据卡 / 图表
+
+## 保存位置(必须)
+把每张图保存到此绝对路径目录(不存在则创建):
+${conceptsDir}/
+文件名: \`concept-<原型名>.png\`(如 concept-monitor-list.png / concept-form.png / concept-detail.png / concept-dashboard.png)
+
+## 交付
+保存后, 每张回一句话: 这张你想表达的视觉主张(配色 / 组件 / 层次)。`
+  ].join("\n");
+
+  return { prompt, stats };
 }

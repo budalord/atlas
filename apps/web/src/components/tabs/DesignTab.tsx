@@ -1,6 +1,7 @@
 import { GlobalFeedbackPanel } from "../GlobalFeedbackPanel";
 import { ScreenList } from "../ScreenList";
 import { AgentTaskTriggers } from "../AgentTaskTriggers";
+import { ConceptPromptButton } from "../ConceptPromptButton";
 
 interface DesignTabProps {
   productId: string;
@@ -17,15 +18,18 @@ export function DesignTab({ productId, readOnly = false }: DesignTabProps) {
   return (
     <div className="relative flex min-h-0 flex-col">
       <GlobalFeedbackPanel productId={productId} scope="prototype" />
-      <div className="flex items-center justify-end border-b border-slate-200 bg-slate-50 px-5 py-1.5">
+      <div className="flex items-center justify-end gap-2 border-b border-slate-200 bg-slate-50 px-5 py-1.5">
         {!readOnly ? (
-          <AgentTaskTriggers
-            productId={productId}
-            triggers={[
-              { label: "生成界面规格", kinds: ["screen-generate"] },
-              { label: "更新界面规格", kinds: ["screen-revise"] }
-            ]}
-          />
+          <>
+            <ConceptPromptButton productId={productId} />
+            <AgentTaskTriggers
+              productId={productId}
+              triggers={[
+                { label: "生成界面规格", kinds: ["screen-generate"] },
+                { label: "更新界面规格", kinds: ["screen-revise"] }
+              ]}
+            />
+          </>
         ) : null}
       </div>
       <ScreenList productId={productId} readOnly={readOnly} />
