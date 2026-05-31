@@ -15,7 +15,7 @@ type ScreenRow = ScreenSummary & { needs_prototype?: boolean; pending_prototype?
  * 双轨设计 · Screen 子视图(v0.1)。
  *
  * 左侧按 module 分组列出 screens, 右侧渲染 markdown + validation issues + 反馈池操作。
- * 生成/更新 screen 由「双轨设计」tab 头部的「生成屏幕 / 更新屏幕」agent batch 按钮触发。
+ * 生成/更新 screen 现由 Claude Code 对话驱动(旧的 codex batch 按钮已撤)。
  *
  * 不在此处做 inline 编辑(v0.1 范围: agent 写盘, UI 只读 + 反馈)。
  */

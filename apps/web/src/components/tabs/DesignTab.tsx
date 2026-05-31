@@ -1,7 +1,7 @@
 import { GlobalFeedbackPanel } from "../GlobalFeedbackPanel";
 import { ScreenList } from "../ScreenList";
-import { AgentTaskTriggers } from "../AgentTaskTriggers";
 import { ConceptPromptButton } from "../ConceptPromptButton";
+import { RenderQueueMonitor } from "../RenderQueueMonitor";
 
 interface DesignTabProps {
   productId: string;
@@ -9,28 +9,20 @@ interface DesignTabProps {
 }
 
 /**
- * 双轨设计区(界面轨)。 顶部「生成屏幕 / 更新屏幕」触发 codex batch 反推/修订 Screen 规格,
- * 主体是 Screen 列表 + 字段可见性 + 原型图审核闸(见 ScreenList)。
+ * 双轨设计区(界面轨)。 顶部 = 渲染工作队列监控(Atlas/Claude 出图,取代旧 codex 任务触发)
+ * + 「复制概念图指令」(给 codex 出概念参考图)。 主体是 Screen 列表 + 字段可见性 +
+ * 原型图审核闸(见 ScreenList)。
  *
- * v0.0 遗留的 design.md 子视图已在此版本删除(从未承载真实文档)。
+ * 规格的生成/更新现由 Claude Code 对话驱动, 不再走 codex batch 按钮(2026-05-31 起)。
+ * v0.0 遗留的 design.md 子视图已删。
  */
 export function DesignTab({ productId, readOnly = false }: DesignTabProps) {
   return (
     <div className="relative flex min-h-0 flex-col">
       <GlobalFeedbackPanel productId={productId} scope="prototype" />
-      <div className="flex items-center justify-end gap-2 border-b border-slate-200 bg-slate-50 px-5 py-1.5">
-        {!readOnly ? (
-          <>
-            <ConceptPromptButton productId={productId} />
-            <AgentTaskTriggers
-              productId={productId}
-              triggers={[
-                { label: "生成界面规格", kinds: ["screen-generate"] },
-                { label: "更新界面规格", kinds: ["screen-revise"] }
-              ]}
-            />
-          </>
-        ) : null}
+      <div className="flex items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-5 py-1.5">
+        <RenderQueueMonitor productId={productId} />
+        {!readOnly ? <ConceptPromptButton productId={productId} /> : null}
       </div>
       <ScreenList productId={productId} readOnly={readOnly} />
     </div>
