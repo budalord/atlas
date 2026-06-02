@@ -1213,10 +1213,13 @@ export async function buildProductInstructPrompt(
     "## 规格全景(模块 → 功能点)",
     index,
     "",
-    FOOTER(
-      productId,
-      "- 这是**修订**任务:改已有规格;新建文件不要加 needs_revision 标签\n- 只动与需求相关的文件,最小变更\n- 改完必须自校验通过(见顶部 batch 规则)"
-    )
+    `## 注意事项
+- 这是**修订**任务:在现有规格上改,不是从零生成
+- 不要触碰 data/products/${productId}/ 之外的文件
+- 文件 frontmatter 必须保留 Atlas 解析约定(id / name / module / created_at 等)
+- 路径:features=modules/<m>/features/<f>.md · screens=modules/<m>/screens/<s>.md · usecases=modules/<m>/usecases/<u>.md · entities=entities/<e>.md 或 modules/<m>/entities/<e>.md · 状态与待办=STATUS.md
+- 只改与本需求直接相关的文件,最小变更;新建文件不要加 needs_revision 标签
+- 改完每个 .md 必须自校验通过(见顶部 batch 规则)`
   ].join("\n");
 
   return { prompt };
