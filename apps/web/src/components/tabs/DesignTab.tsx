@@ -1,7 +1,6 @@
 import { GlobalFeedbackPanel } from "../GlobalFeedbackPanel";
 import { ScreenList } from "../ScreenList";
 import { ConceptPromptButton } from "../ConceptPromptButton";
-import { RenderQueueMonitor } from "../RenderQueueMonitor";
 
 interface DesignTabProps {
   productId: string;
@@ -20,8 +19,7 @@ export function DesignTab({ productId, readOnly = false }: DesignTabProps) {
   return (
     <div className="relative flex min-h-0 flex-col">
       <GlobalFeedbackPanel productId={productId} scope="prototype" />
-      <div className="flex items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 px-5 py-1.5">
-        <RenderQueueMonitor productId={productId} />
+      <div className="flex items-center justify-end gap-2 border-b border-slate-200 bg-slate-50 px-5 py-1.5">
         {!readOnly ? <ConceptPromptButton productId={productId} /> : null}
       </div>
       <ScreenList productId={productId} readOnly={readOnly} />

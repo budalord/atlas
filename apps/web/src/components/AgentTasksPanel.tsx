@@ -3,6 +3,7 @@ import { useDataChange } from "../lib/useDataChange";
 import { useUiStore } from "../stores/uiStore";
 import type { ApiEnvelope, Task, TaskStage } from "../types";
 import { ReviewChangesetModal } from "./ReviewChangesetModal";
+import { RenderQueueMonitor } from "./RenderQueueMonitor";
 
 interface AgentTasksPanelProps {
   productId: string;
@@ -100,16 +101,18 @@ export function AgentTasksPanel({ productId }: AgentTasksPanelProps) {
     return { active, recent };
   }, [tasks]);
 
-  if (buckets.active.length === 0 && buckets.recent.length === 0) return null;
-
   return (
     <section className="space-y-3 border-b border-slate-200 bg-white px-6 py-4">
-      <div className="flex items-baseline justify-between">
-        <h2 className="text-sm font-semibold text-slate-950">🤖 Agent 任务</h2>
-        <span className="text-[11px] text-slate-500">
-          {buckets.active.length > 0 ? `${buckets.active.length} 个进行中` : "无进行中"}
-          {buckets.recent.length > 0 ? ` · ${buckets.recent.length} 个最近完成` : ""}
-        </span>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold text-slate-950">🤖 Agent 活动</h2>
+        <div className="flex items-center gap-3">
+          <span className="text-[11px] text-slate-500">
+            {buckets.active.length > 0 ? `${buckets.active.length} 个进行中` : "无进行中"}
+            {buckets.recent.length > 0 ? ` · ${buckets.recent.length} 个最近完成` : ""}
+          </span>
+          {/* 渲染/出图 工作的状态 + 入口(从 DesignTab 收编到统一活动条) */}
+          <RenderQueueMonitor productId={productId} />
+        </div>
       </div>
 
       {buckets.active.length > 0 ? (

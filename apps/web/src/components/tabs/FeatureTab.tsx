@@ -371,17 +371,18 @@ export function FeatureTab({ productId, readOnly = false, embedded = false }: Fe
             <FeatureOverlapBanner productId={productId} readOnly={readOnly} />
             <GlobalFeedbackPanel productId={productId} scope="feature" />
             {!readOnly ? (
-              <AgentTaskTriggers
-                className="px-5 pt-3"
-                productId={productId}
-                triggers={[
-                  {
-                    // 一次过:按反馈修订功能 → 修订用例 → 给无用例的功能补用例(三个 agent 串行排队)
-                    label: "更新功能与用例",
-                    kinds: ["feature-revise", "usecase-revise", "usecase-generate"]
-                  }
-                ]}
-              />
+              <div className="flex items-center justify-end border-b border-slate-200 bg-slate-50 px-5 py-1.5">
+                <AgentTaskTriggers
+                  productId={productId}
+                  triggers={[
+                    {
+                      // 一次过:按反馈修订功能 → 修订用例 → 给无用例的功能补用例(三个 agent 串行排队)
+                      label: "更新功能与用例",
+                      kinds: ["feature-revise", "usecase-revise", "usecase-generate"]
+                    }
+                  ]}
+                />
+              </div>
             ) : null}
             <div className="px-5 pt-3 pb-2 text-[11px] text-slate-500">
               <span className="font-medium text-slate-700">{data.length}</span> 个模块 ·{" "}

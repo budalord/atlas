@@ -103,18 +103,19 @@ export function EntityTab({ productId, readOnly = false }: EntityTabProps) {
       <ToolBar entitiesData={entitiesData} />
 
       {!readOnly ? (
-        <AgentTaskTriggers
-          className="px-5 pb-2"
-          productId={productId}
-          triggers={[
-            {
-              label: "更新实体",
-              kinds: ["entity-derive", "entity-revise"],
-              disabled: entitiesData.exists && !entitiesData.stale,
-              disabledHint: "功能点等来源无更新,实体无需重派生"
-            }
-          ]}
-        />
+        <div className="flex items-center justify-end border-b border-slate-200 bg-slate-50 px-5 py-1.5">
+          <AgentTaskTriggers
+            productId={productId}
+            triggers={[
+              {
+                label: "更新实体",
+                kinds: ["entity-derive", "entity-revise"],
+                disabled: entitiesData.exists && !entitiesData.stale,
+                disabledHint: "功能点等来源无更新,实体无需重派生"
+              }
+            ]}
+          />
+        </div>
       ) : null}
 
       {entitiesData.stale ? (
