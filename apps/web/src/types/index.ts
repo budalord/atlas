@@ -41,6 +41,12 @@ export type {
   UseCaseReviseTask,
   ScreenGenerateTask,
   ScreenReviseTask,
+  // 开发中阶段 Session 编排树
+  ProductInstructTask,
+  NodeState,
+  TaskPlan,
+  AgentSession,
+  AgentSessionTree,
   ChangedFile,
   ChangeFileSummary,
   // 批次 1' · 反馈池(精简后只剩 id/date/content)

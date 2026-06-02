@@ -16,6 +16,8 @@ import type {
   FeatureGenerateTask,
   UseCaseGenerateTask,
   ConventionsGenerateTask,
+  ProductInstructTask,
+  TaskPlan,
   ChangedFile
 } from "@atlas/shared";
 import { featureFilePath, loadFeature } from "./entityLoader";
@@ -36,7 +38,8 @@ import {
   buildEntityDerivePrompt,
   buildFeatureGeneratePrompt,
   buildUseCaseGeneratePrompt,
-  buildConventionsGeneratePrompt
+  buildConventionsGeneratePrompt,
+  buildProductInstructPrompt
 } from "./generatePromptBuilder";
 import { restoreFromBackups, clearBackups } from "./changesetTracker";
 import { flagRevisedScreensForReprototype } from "./prototypeQueue";
@@ -67,6 +70,10 @@ interface FeatureRefinePayload {
 interface BatchPayload {
   productId: string;
   productDir: string;
+  /** product-instruct 用:决策者自由文本子指令 */
+  instruction?: string;
+  /** product-instruct 用:所属 Session id(独立入队时为空串) */
+  sessionId?: string;
 }
 
 type InternalTask =
@@ -80,7 +87,8 @@ type InternalTask =
   | (EntityDeriveTask & { payload: BatchPayload })
   | (FeatureGenerateTask & { payload: BatchPayload })
   | (UseCaseGenerateTask & { payload: BatchPayload })
-  | (ConventionsGenerateTask & { payload: BatchPayload });
+  | (ConventionsGenerateTask & { payload: BatchPayload })
+  | (ProductInstructTask & { payload: BatchPayload });
 
 const tasks: InternalTask[] = [];
 let running = false;
@@ -113,6 +121,18 @@ function publicView(t: InternalTask): Task {
       featureId: t.featureId,
       featureName: t.featureName
     } as FeatureRefineTask;
+  }
+  if (t.kind === "product-instruct") {
+    const plans = (t as ProductInstructTask).plans ?? [];
+    return {
+      ...baseView(t),
+      kind: "product-instruct",
+      instruction: t.payload.instruction ?? "",
+      sessionId: t.payload.sessionId ?? "",
+      plans,
+      // 让现有 AgentTasksPanel 仍能显示 running 步骤:把各 plan 的 steps 摊平回 task.steps
+      steps: plans.flatMap((p) => p.steps)
+    } as ProductInstructTask;
   }
   return { ...baseView(t), kind: t.kind } as Task;
 }
@@ -237,6 +257,9 @@ async function runOne(t: InternalTask): Promise<void> {
         return;
       case "conventions-generate":
         await runBatchRevise(t, buildConventionsGeneratePrompt);
+        return;
+      case "product-instruct":
+        await runProductInstruct(t);
         return;
     }
   } catch (err) {
@@ -384,6 +407,78 @@ async function runBatchRevise(t: BatchTask, builder: PromptBuilder): Promise<voi
   // v0.2c §5.6b: 聚合 changedFiles.summary 算 task 级一句话
   const summaryLine = summarizeBatchTask(result.changedFiles);
 
+  setStage(t, "awaiting_review", {
+    finishedAt: new Date().toISOString(),
+    changedFiles: result.changedFiles,
+    summaryLine
+  });
+}
+
+/**
+ * 开发中阶段「需求 → 改规格」执行(Session 树里的单个 Task)。
+ * 与 runBatchRevise 同构,差别:prompt 用 buildProductInstructPrompt(带自由文本指令),
+ * 且把 codex 的实时 step 写进该 Task 的 execute Plan(plan.steps)而非 task 顶层。
+ * 跑完仍落入现有三态闸(awaiting_review),审核走现有 ReviewChangesetModal。
+ */
+async function runProductInstruct(
+  t: ProductInstructTask & { payload: BatchPayload }
+): Promise<void> {
+  if (!t.plans || t.plans.length === 0) {
+    t.plans = [{ id: randomUUID(), kind: "execute", state: "pending", steps: [] }];
+  }
+  const plan = t.plans[0];
+  plan.state = "running";
+
+  let prompt: string;
+  try {
+    const built = await buildProductInstructPrompt(
+      t.payload.productId,
+      t.payload.instruction ?? ""
+    );
+    prompt = built.prompt;
+  } catch (err) {
+    plan.state = "failed";
+    setStage(t, "failed", {
+      finishedAt: new Date().toISOString(),
+      error: `build prompt failed: ${err instanceof Error ? err.message : String(err)}`
+    });
+    return;
+  }
+
+  const result = await runCodexMultiFile({
+    prompt,
+    cwd: t.payload.productDir,
+    taskId: t.id,
+    timeoutMs: 30 * 60_000,
+    onStep: (label: string) => {
+      const ts = new Date().toISOString();
+      plan.steps.push({ ts, label });
+      if (plan.steps.length > 40) plan.steps.splice(0, plan.steps.length - 40);
+      bumpDataVersion(`task:${t.id}:step`);
+    }
+  });
+
+  if (!result.ok) {
+    plan.state = "failed";
+    setStage(t, "failed", {
+      finishedAt: new Date().toISOString(),
+      error: result.error || "codex run failed"
+    });
+    return;
+  }
+
+  if (result.changedFiles.length === 0) {
+    plan.state = "finished";
+    setStage(t, "completed", {
+      finishedAt: new Date().toISOString(),
+      summaryLine: "本次无文件变更(agent 判断无需改动)"
+    });
+    return;
+  }
+
+  plan.changedFiles = result.changedFiles;
+  plan.state = "finished";
+  const summaryLine = summarizeBatchTask(result.changedFiles);
   setStage(t, "awaiting_review", {
     finishedAt: new Date().toISOString(),
     changedFiles: result.changedFiles,
@@ -707,12 +802,22 @@ export async function retryTask(
       extraInstruction: [t.payload.extraInstruction, extra].filter(Boolean).join("\n")
     });
   } else {
-    // batch kinds: 回滚 backup 再重排同 kind 任务 (extra 暂不支持, batch 没单独 prompt 调整渠道)
+    // batch kinds: 回滚 backup 再重排同 kind 任务
     if (t.stage === "awaiting_review") {
       const files = t.changedFiles ?? [];
       await restoreFromBackups(t.payload.productDir, t.id, files).catch(() => undefined);
     }
-    next = enqueueBatch({ productId: t.payload.productId, kind: t.kind });
+    // product-instruct:带回原指令 + sessionId,extra 作为重做补充指令追加
+    const instruction =
+      t.kind === "product-instruct"
+        ? [t.payload.instruction, extra].filter(Boolean).join("\n")
+        : undefined;
+    next = enqueueBatch({
+      productId: t.payload.productId,
+      kind: t.kind,
+      instruction,
+      sessionId: t.kind === "product-instruct" ? t.payload.sessionId : undefined
+    });
   }
 
   if (t.stage === "awaiting_review") {
@@ -725,12 +830,24 @@ export async function retryTask(
 export interface EnqueueBatchArgs {
   productId: string;
   kind: Exclude<TaskKind, "feature-refine">;
+  /** product-instruct 用:决策者自由文本子指令 */
+  instruction?: string;
+  /** product-instruct 用:所属 Session id */
+  sessionId?: string;
+}
+
+/** product-instruct 的 Task 标题取指令前若干字。 */
+function instructionTitle(instruction: string | undefined): string {
+  const s = (instruction ?? "").trim().replace(/\s+/g, " ");
+  if (!s) return "按需求改规格";
+  return s.length > 40 ? `${s.slice(0, 40)}…` : s;
 }
 
 export function enqueueBatch(args: EnqueueBatchArgs): Task {
   const id = randomUUID();
   const productDir = dataPath("products", args.productId);
-  const title = batchTaskTitle(args.kind);
+  const isInstruct = args.kind === "product-instruct";
+  const title = isInstruct ? instructionTitle(args.instruction) : batchTaskTitle(args.kind);
   const base = {
     id,
     productId: args.productId,
@@ -741,7 +858,15 @@ export function enqueueBatch(args: EnqueueBatchArgs): Task {
     startedAt: null,
     finishedAt: null,
     error: null,
-    payload: { productId: args.productId, productDir }
+    payload: {
+      productId: args.productId,
+      productDir,
+      ...(isInstruct ? { instruction: args.instruction ?? "", sessionId: args.sessionId ?? "" } : {})
+    },
+    // product-instruct:初始化 execute Plan(Session 树的 Plan 层)
+    ...(isInstruct
+      ? { plans: [{ id: randomUUID(), kind: "execute", state: "pending", steps: [] }] as TaskPlan[] }
+      : {})
   };
   // TS: 通过 kind 字面量给出具体 InternalTask 变体
   const t = base as InternalTask;
@@ -763,6 +888,7 @@ function batchTaskTitle(kind: Exclude<TaskKind, "feature-refine">): string {
     case "feature-generate": return "Generate features (batch)";
     case "usecase-generate": return "Generate use cases (batch)";
     case "conventions-generate": return "Generate conventions (batch)";
+    case "product-instruct": return "按需求改规格";
   }
 }
 

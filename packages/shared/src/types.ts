@@ -815,7 +815,9 @@ export type TaskKind =
   | "entity-derive"
   | "feature-generate"
   | "usecase-generate"
-  | "conventions-generate";
+  | "conventions-generate"
+  // 开发中阶段:决策者自由文本需求 → agent 直接改规格(Session 编排树里的单个 Task 原子)
+  | "product-instruct";
 
 /** batch kinds 跑完后, 由 changesetTracker 反推的单条文件变更。 */
 export interface ChangedFile {
@@ -916,6 +918,20 @@ export interface ConventionsGenerateTask extends BaseTask {
   kind: "conventions-generate";
 }
 
+/**
+ * 开发中阶段「需求框 → agent 直接改规格」的单个 Task 原子。
+ * 它是 Session 编排树(Session→Task→Plan→Step)里的 Task 层,仍走现有三态闸。
+ * - instruction: 决策者自由文本需求(规划器拆分后的"带范围子指令")
+ * - sessionId: 所属 Session(树的根);独立入队时为空串
+ * - plans: 该 Task 下的 Plan 列表(phase1 恒为 1 个 execute Plan),codex 内部 ReAct = plan.steps
+ */
+export interface ProductInstructTask extends BaseTask {
+  kind: "product-instruct";
+  instruction: string;
+  sessionId: string;
+  plans?: TaskPlan[];
+}
+
 export type Task =
   | FeatureRefineTask
   | FeatureReviseTask
@@ -927,10 +943,52 @@ export type Task =
   | EntityDeriveTask
   | FeatureGenerateTask
   | UseCaseGenerateTask
-  | ConventionsGenerateTask;
+  | ConventionsGenerateTask
+  | ProductInstructTask;
 
 /** 兼容别名: 旧代码用 RefineTask = FeatureRefineTask */
 export type RefineTask = FeatureRefineTask;
+
+// ───────────────────────── Session 编排树(开发中阶段) ─────────────────────────
+
+/** 树节点三态(图:pending 灰 / running 蓝 / finished 绿)。failed 为终态变体。 */
+export type NodeState = "pending" | "running" | "finished" | "failed";
+
+/**
+ * Plan = Task 内的一次 codex 运行(phase1 恒为 execute)。
+ * codex 单次运行内部的 观察→思考→行动→结果 迭代即 steps(复用 TaskStep / onStep)。
+ */
+export interface TaskPlan {
+  id: string;
+  kind: "execute" | "validate" | "fix";
+  state: NodeState;
+  steps: TaskStep[];
+  /** 该 Plan 产出的文件变更(phase1 即 Task 的 changedFiles) */
+  changedFiles?: ChangedFile[];
+}
+
+/**
+ * Session = 一次需求框提交(树的根)。规划器把一句话需求拆成 1..N 个 Task。
+ * Session 本身不持审核态 — 审核仍在每个子 Task 的三态闸上(memory:不另起平行审核态)。
+ */
+export interface AgentSession {
+  id: string;
+  productId: string;
+  /** 决策者原始一句话需求 */
+  instruction: string;
+  state: NodeState;
+  createdAt: string;
+  /** 子 Task id(= ProductInstructTask.id),顺序即串行执行序 */
+  taskIds: string[];
+  /** 规划器失败信息(失败则兜底为单 Task) */
+  planError?: string | null;
+}
+
+/** Session 树视图:Session + 其子 Task 的公开视图(给前端 SessionTreePanel)。 */
+export interface AgentSessionTree {
+  session: AgentSession;
+  tasks: ProductInstructTask[];
+}
 
 /**
  * 产品规格层(Layer 2)文件类别。

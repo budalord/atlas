@@ -1159,3 +1159,126 @@ ${conceptsDir}/
 
   return { prompt, stats };
 }
+
+// ───────────────────── 开发中阶段:需求框 → agent 改规格 ─────────────────────
+
+/** 模块 → 功能点 索引(给执行/规划 agent 看清能改哪些规格文件)。 */
+async function moduleFeatureIndex(productId: string): Promise<string> {
+  const modules = await loadModules(productId);
+  if (modules.length === 0) return "(该产品尚未建模块/功能点树)";
+  const lines: string[] = [];
+  for (const mod of modules) {
+    const features = await loadFeatures(productId, mod.name);
+    lines.push(`- **${mod.title || mod.name}** (${mod.name}) · ${features.length} 功能点`);
+    for (const f of features) {
+      lines.push(`    - ${f.id}: ${f.name}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+/**
+ * 开发中阶段「执行」prompt:决策者一句话需求 → agent 自行判断改哪些规格 md 并落盘。
+ * 由 runCodexMultiFile 跑(workspace-write),其已自动前置 V02B1_BATCH_PREAMBLE(强制自校验)。
+ * instruction 是规划器拆分后的"带范围子指令"(单 Task 范围)。
+ */
+export async function buildProductInstructPrompt(
+  productId: string,
+  instruction: string
+): Promise<{ prompt: string }> {
+  const meta = await loadMeta(productId);
+  const index = await moduleFeatureIndex(productId);
+
+  const prompt = [
+    await header(meta, productId, "开发中·按需求改规格"),
+    `## 你的任务
+你是 Atlas **开发中阶段的规格维护 Agent**。决策者给了一句话需求,你**自行判断**该改哪些规格文件
+(功能点 features / 用例 usecases / 界面屏 screens / 实体 entities / STATUS.md 等),用 Edit/Write 直接落盘,
+严格遵守各 contract。改完每个 .md 必须按顶部 batch 规则调 \`/api/agent/validate/<scope>\` 自校验到通过。
+
+**只改与本需求直接相关的文件**(最小变更),不要顺手重构无关规格。改不动 / 信息不足的点,在对应文件
+留 \`<!-- Agent note: ... -->\` 或往反馈池追加一条,不要瞎编业务规则。`,
+    "",
+    AGENT_SELF_DECISION_PRINCIPLE,
+    "",
+    DECISION_MAKER_VIEW_GUIDE,
+    "",
+    "## 决策者需求(本次任务 · 优先级最高)",
+    "",
+    instruction.trim() || "(空 — 无需求,直接结束不改动)",
+    "",
+    "## 当前产品",
+    describeProduct(meta, productId),
+    "",
+    "## 规格全景(模块 → 功能点)",
+    index,
+    "",
+    FOOTER(
+      productId,
+      "- 这是**修订**任务:改已有规格;新建文件不要加 needs_revision 标签\n- 只动与需求相关的文件,最小变更\n- 改完必须自校验通过(见顶部 batch 规则)"
+    )
+  ].join("\n");
+
+  return { prompt };
+}
+
+/** 规划器解析出的单个 Task。 */
+export interface PlannedTask {
+  title: string;
+  scopedInstruction: string;
+  targetHint?: string;
+}
+
+/**
+ * Session 规划器 prompt(只读):把一句话需求拆成 1..N 个带范围的 Task。
+ * 要求严格输出一个 ```json 代码块 {"tasks":[{title,scopedInstruction,targetHint}]}。
+ * 简单需求 → 单 Task;跨多个目标(多功能/多屏/多实体)→ 按自然边界拆。
+ */
+export async function buildSessionPlanPrompt(
+  productId: string,
+  instruction: string
+): Promise<{ prompt: string }> {
+  const meta = await loadMeta(productId);
+  const index = await moduleFeatureIndex(productId);
+
+  const prompt = [
+    await header(meta, productId, "开发中·需求规划"),
+    `## 你的任务
+你是 Atlas 开发中阶段的**规划器**。把决策者的一句话需求拆成 1..N 个**带范围的 Task**,
+每个 Task 后续会由一个执行 agent 独立去改对应规格文件、并独立进人审。
+
+## 拆分原则
+- **简单需求**(只动一个功能点 / 改个 STATUS 字段 / 一处文案)→ **只出 1 个 Task**,不要为凑数硬拆。
+- **跨多个自然目标**(同时要改多个功能点 / 多个界面屏 / 多个实体 / 牵一发动全身的流程)→ 按目标边界拆成多个 Task,
+  每个 Task 聚焦一个可独立审核的改动面。
+- 每个 Task 的 \`scopedInstruction\` 要**自包含**(执行 agent 看不到原始整句),写清改什么、改到什么程度。
+- \`targetHint\` 可选:点名预计触及的规格文件 / 功能点 id / 模块,帮执行 agent 快速定位(不确定就省略)。
+- Task 数量保守:宁可少拆,不要把一个改动面切碎成琐碎 Task。`,
+    "",
+    "## 决策者需求",
+    "",
+    instruction.trim(),
+    "",
+    "## 当前产品",
+    describeProduct(meta, productId),
+    "",
+    "## 规格全景(模块 → 功能点)",
+    index,
+    "",
+    `## 输出格式(严格)
+**只输出一个 \`\`\`json 代码块**,不要任何解释性前后缀:
+
+\`\`\`json
+{
+  "tasks": [
+    { "title": "简短标题", "scopedInstruction": "自包含的子指令", "targetHint": "可选:涉及的功能点/屏/模块" }
+  ]
+}
+\`\`\`
+
+- 至少 1 个 Task;无法拆分时就 1 个 Task,scopedInstruction = 原需求。
+- 不要写 targetHint 时省略该字段即可。`
+  ].join("\n");
+
+  return { prompt };
+}

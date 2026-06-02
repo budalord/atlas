@@ -13,6 +13,7 @@ import {
 } from "../services/taskQueue";
 import type { TaskKind } from "@atlas/shared";
 import { getDataVersion } from "../services/watcher";
+import { createSession } from "../services/sessionOrchestrator";
 
 type TaskReq = Request<{ tid: string }>;
 type ChangesetFileReq = Request<{ tid: string; idx: string }>;
@@ -61,6 +62,17 @@ tasksRouter.post("/", (req, res) => {
   const kind = req.body?.kind;
   if (!productId) {
     res.status(400).json({ error: "productId required" });
+    return;
+  }
+  // 开发中阶段:product-instruct 不直接入队,先建 Session(规划器拆 Task 后再入队)
+  if (kind === "product-instruct") {
+    const instruction = typeof req.body?.instruction === "string" ? req.body.instruction.trim() : "";
+    if (!instruction) {
+      res.status(400).json({ error: "instruction required for product-instruct" });
+      return;
+    }
+    const tree = createSession(productId, instruction);
+    res.status(201).json({ data: tree, version: getDataVersion() });
     return;
   }
   if (!BATCH_KINDS.includes(kind)) {
