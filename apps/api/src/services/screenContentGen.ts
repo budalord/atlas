@@ -11,7 +11,7 @@ import { promises as fs } from "node:fs";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { DATA_ROOT } from "./fileReader";
 
 const atlasRoot = path.resolve(DATA_ROOT, "..");
@@ -72,28 +72,47 @@ export interface ContentGenResult {
   detail: string;
 }
 
-/** spawn claude -p 生成该屏真内容区。返回是否成功 + 是否产出了真内容。 */
+const GEN_TIMEOUT_MS = 600_000; // 10min — claude 画复杂屏可能 >4min, 给足以免误兜底桩
+
+/**
+ * spawn claude -p 生成该屏真内容区。**异步**(不阻塞 api 事件循环), 超时杀进程。
+ * 返回是否成功 + 是否产出了真内容。
+ */
 export function generateScreenContent(
   productId: string,
   moduleName: string,
   screenId: string
-): ContentGenResult {
+): Promise<ContentGenResult> {
   const exec = findClaudeExec();
-  if (!exec) return { ok: false, real: false, detail: "找不到 Claude Code 可执行文件" };
+  if (!exec) return Promise.resolve({ ok: false, real: false, detail: "找不到 Claude Code 可执行文件" });
 
   const prompt = buildPrompt(productId, moduleName, screenId);
-  const r = spawnSync(
-    exec,
-    ["-p", prompt, "--permission-mode", "acceptEdits", "--model", "sonnet"],
-    { cwd: atlasRoot, encoding: "utf8", timeout: 240_000, stdio: ["ignore", "pipe", "pipe"] }
-  );
-
   const contentPath = path.join(atlasRoot, "data", "products", productId, "shells", "v1", "content", `${screenId}.html`);
-  if (r.status !== 0 && !existsSync(contentPath)) {
-    return { ok: false, real: false, detail: `claude 退出 ${r.status}: ${(r.stderr || r.error?.message || "").slice(0, 200)}` };
-  }
-  const real = !isStubOrMissing(contentPath);
-  return { ok: existsSync(contentPath), real, detail: real ? "已生成真内容" : "未产出真内容" };
+
+  return new Promise((resolve) => {
+    const child = spawn(exec, ["-p", prompt, "--permission-mode", "acceptEdits", "--model", "sonnet"], {
+      cwd: atlasRoot,
+      stdio: ["ignore", "ignore", "pipe"]
+    });
+    let stderr = "";
+    child.stderr?.on("data", (d) => { stderr += String(d); });
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; try { child.kill("SIGKILL"); } catch { /* noop */ } }, GEN_TIMEOUT_MS);
+    child.on("error", (e) => {
+      clearTimeout(timer);
+      resolve({ ok: existsSync(contentPath), real: !isStubOrMissing(contentPath), detail: `spawn 错误: ${e.message}` });
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      const real = !isStubOrMissing(contentPath);
+      const detail = real
+        ? "已生成真内容"
+        : timedOut
+          ? `超时 ${GEN_TIMEOUT_MS / 1000}s 被杀`
+          : `未产出真内容 (code ${code}) ${stderr.slice(0, 150)}`;
+      resolve({ ok: existsSync(contentPath), real, detail });
+    });
+  });
 }
 
 /** 确保真内容: 缺/桩则生成; 生成失败回退桩(由调用方写)。返回是否已是真内容。 */
@@ -105,6 +124,6 @@ export async function ensureRealContent(
   const contentPath = path.join(atlasRoot, "data", "products", productId, "shells", "v1", "content", `${screenId}.html`);
   if (!isStubOrMissing(contentPath)) return true; // 已有真内容
   await fs.mkdir(path.dirname(contentPath), { recursive: true });
-  const res = generateScreenContent(productId, moduleName, screenId);
+  const res = await generateScreenContent(productId, moduleName, screenId);
   return res.real;
 }
