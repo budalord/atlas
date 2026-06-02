@@ -176,8 +176,11 @@ export function ProductFlowOverview({ productId, readOnly = false, onDrill }: Pr
               <AgentTaskTriggers
                 productId={productId}
                 triggers={[
-                  { label: "生成界面规格", kinds: ["screen-generate"] },
-                  { label: "更新界面规格", kinds: ["screen-revise"] }
+                  {
+                    // 一个按钮串行:反推产出缺的屏(generate)→ 按反馈改已有屏(revise)
+                    label: "生成/更新界面规格",
+                    kinds: ["screen-generate", "screen-revise"]
+                  }
                 ]}
               />
             ) : null
@@ -185,7 +188,7 @@ export function ProductFlowOverview({ productId, readOnly = false, onDrill }: Pr
         >
           {screens.length === 0 ? (
             <div className="rounded-md border border-dashed border-slate-300 px-4 py-8 text-center text-xs text-slate-400">
-              暂无界面屏。用上方「生成界面规格」让 agent 反推。
+              暂无界面屏。用上方「生成/更新界面规格」让 agent 反推。
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-3">

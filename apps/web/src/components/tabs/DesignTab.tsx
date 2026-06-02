@@ -24,8 +24,11 @@ export function DesignTab({ productId, readOnly = false }: DesignTabProps) {
             <AgentTaskTriggers
               productId={productId}
               triggers={[
-                { label: "生成界面规格", kinds: ["screen-generate"] },
-                { label: "更新界面规格", kinds: ["screen-revise"] }
+                {
+                  // 一个按钮串行:反推产出缺的屏(generate)→ 按反馈改已有屏(revise)
+                  label: "生成/更新界面规格",
+                  kinds: ["screen-generate", "screen-revise"]
+                }
               ]}
             />
             <ConceptPromptButton productId={productId} />
