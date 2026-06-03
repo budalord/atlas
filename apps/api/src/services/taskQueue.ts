@@ -18,6 +18,7 @@ import type {
   ConventionsGenerateTask,
   ProductInstructTask,
   CodeInstructTask,
+  InstructTask,
   TaskPlan,
   ChangedFile
 } from "@atlas/shared";
@@ -99,6 +100,27 @@ type InternalTask =
 const tasks: InternalTask[] = [];
 let running = false;
 
+/**
+ * 任务变更监听器(改造 5 持久化用)。sessionOrchestrator 注册一个,在 Task 状态/编排变化时
+ * 把所属 Session 树落盘。用注册回调而非直接 import,保持 taskQueue → sessionOrchestrator 单向无环。
+ */
+type TaskChangeListener = (task: Task) => void;
+const taskChangeListeners: TaskChangeListener[] = [];
+export function onTaskChange(fn: TaskChangeListener): void {
+  taskChangeListeners.push(fn);
+}
+function fireTaskChange(t: InternalTask): void {
+  if (taskChangeListeners.length === 0) return;
+  const view = publicView(t);
+  for (const fn of taskChangeListeners) {
+    try {
+      fn(view);
+    } catch {
+      /* 监听器异常不影响队列 */
+    }
+  }
+}
+
 /** 公共字段集合 (各 kind 共用)。 */
 function baseView(t: InternalTask) {
   return {
@@ -168,6 +190,8 @@ function setStage(t: InternalTask, stage: TaskStage, extra?: Partial<InternalTas
       console.warn(`task-history append failed for ${t.id}:`, e);
     });
   }
+  // 改造 5:任何 stage 迁移都通知持久化(Session 树落盘)
+  fireTaskChange(t);
 }
 
 export function getQueue(): Task[] {
@@ -177,6 +201,51 @@ export function getQueue(): Task[] {
 export function getTask(id: string): Task | null {
   const t = tasks.find((x) => x.id === id);
   return t ? publicView(t) : null;
+}
+
+/**
+ * 改造 5:重启恢复 —— 从持久化的 Session 树把 InstructTask 回灌进队列。
+ * - stage 归一:running(codex 子进程已随进程死)→ queued 重跑;其余原样(awaiting_review
+ *   的工作树改动 / .atlas-staging 都在盘上,可续审)。
+ * - 仅处理 instruct kinds(Session 树里只有这两种)。
+ */
+export function rehydrateInstructTask(view: InstructTask): void {
+  if (tasks.some((x) => x.id === view.id)) return; // 去重
+  const stage: TaskStage = view.stage === "running" ? "queued" : view.stage;
+  const plans = (view.plans ?? []).map((p) => ({
+    ...p,
+    state: p.state === "running" ? "pending" : p.state,
+    steps: p.steps ?? []
+  })) as TaskPlan[];
+  const isCode = view.kind === "code-instruct";
+  const payload: BatchPayload = {
+    productId: view.productId,
+    productDir: dataPath("products", view.productId),
+    instruction: view.instruction,
+    sessionId: view.sessionId,
+    ...(isCode ? { repoDir: (view as CodeInstructTask).repoDir } : {})
+  };
+  const t = {
+    id: view.id,
+    productId: view.productId,
+    kind: view.kind,
+    title: view.title,
+    stage,
+    enqueuedAt: view.enqueuedAt,
+    startedAt: view.startedAt,
+    finishedAt: view.finishedAt,
+    error: view.error,
+    changedFiles: view.changedFiles,
+    summaryLine: view.summaryLine,
+    plans,
+    payload
+  } as InternalTask;
+  tasks.push(t);
+}
+
+/** 恢复完成后驱动 worker,把 queued(含被重置)任务跑起来。 */
+export function resumeQueue(): void {
+  void tick();
 }
 
 /** 单文件级 changeset 详情, 给 GET /:tid/changeset 用。 */
@@ -940,6 +1009,7 @@ export async function deleteTask(taskId: string): Promise<{ ok: true } | { error
 
   tasks.splice(idx, 1);
   bumpDataVersion(`task:delete:${taskId}`);
+  fireTaskChange(t); // 改造 5:从树里移除后重落盘(该 Task 已不在 getSessionTree)
   void tick(); // 同仓被守卫挡住的 code 任务可续跑
   return { ok: true };
 }
@@ -1044,6 +1114,7 @@ export function enqueueBatch(args: EnqueueBatchArgs): Task {
   const t = base as InternalTask;
   tasks.push(t);
   bumpDataVersion(`task:enqueue:${id}`);
+  fireTaskChange(t); // 改造 5:初始 queued 态落盘
   void tick();
   return publicView(t);
 }

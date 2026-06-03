@@ -23,6 +23,7 @@ import { usecasesRouter } from "./routes/usecases";
 import { wizardRouter } from "./routes/wizard";
 import { DATA_ROOT } from "./services/fileReader";
 import { getDataVersion, onDataChange, startDataWatcher } from "./services/watcher";
+import { loadPersistedOrchestration } from "./services/sessionOrchestrator";
 
 const app = express();
 const port = Number(process.env.PORT ?? 3001);
@@ -86,6 +87,9 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
 });
 
 startDataWatcher();
+
+// 改造 5:启动时读回未完成的编排树(续跑/续审)。best-effort,失败不影响启动。
+void loadPersistedOrchestration().catch((e) => console.warn("[atlas-api] 编排树恢复失败:", e));
 
 const server = app.listen(port, () => {
   console.log(`Atlas API listening on http://127.0.0.1:${port}`);

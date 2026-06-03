@@ -4,8 +4,9 @@ import { runCodex } from "./codexRunner";
 import { buildSessionPlanPrompt, type PlannedTask } from "./generatePromptBuilder";
 import { dataPath } from "./fileReader";
 import { bumpDataVersion } from "./watcher";
-import { enqueueBatch, getTask } from "./taskQueue";
+import { enqueueBatch, getTask, onTaskChange, rehydrateInstructTask, resumeQueue } from "./taskQueue";
 import { resolveRepoDir } from "./repoResolver";
+import { persistTree, loadAllTrees } from "./orchestrationStore";
 
 /**
  * 开发中阶段「需求框 → agent 改规格」的 Session 编排层(树的根)。
@@ -19,6 +20,21 @@ import { resolveRepoDir } from "./repoResolver";
  */
 
 const sessions = new Map<string, AgentSession>();
+
+/** 改造 5:把某 Session 的当前树落盘(best-effort)。 */
+function persist(sessionId: string): void {
+  const tree = getSessionTree(sessionId);
+  if (tree) void persistTree(tree);
+}
+
+/**
+ * 改造 5:注册任务变更监听 —— 任一 Task 状态/编排变化时,把其所属 Session 树落盘。
+ * 用回调而非反向 import,保持 taskQueue 不依赖本模块。
+ */
+onTaskChange((task) => {
+  const sid = (task as InstructTask).sessionId;
+  if (sid && sessions.has(sid)) persist(sid);
+});
 
 /** 由子 Task 的 stage 派生 Session 树状态。 */
 function deriveState(s: AgentSession): NodeState {
@@ -117,6 +133,7 @@ async function planAndEnqueue(s: AgentSession): Promise<void> {
     s.taskIds.push(task.id);
   }
   bumpDataVersion(`session:${s.id}:planned`);
+  persist(s.id);
 }
 
 /**
@@ -130,6 +147,7 @@ async function planAndEnqueueCode(s: AgentSession): Promise<void> {
   } catch (err) {
     s.planError = err instanceof Error ? err.message : String(err);
     bumpDataVersion(`session:${s.id}:planned`);
+    persist(s.id);
     return; // taskIds 空 + planError → deriveState 返回 failed
   }
   const task = enqueueBatch({
@@ -141,6 +159,7 @@ async function planAndEnqueueCode(s: AgentSession): Promise<void> {
   });
   s.taskIds.push(task.id);
   bumpDataVersion(`session:${s.id}:planned`);
+  persist(s.id);
 }
 
 /**
@@ -164,6 +183,37 @@ export function createSession(
   };
   sessions.set(s.id, s);
   bumpDataVersion(`session:${s.id}:created`);
+  persist(s.id); // 改造 5:建树即落盘(规划尚未拆出 Task)
   void planAndEnqueue(s); // 不阻塞 HTTP 响应
   return getSessionTree(s.id)!;
+}
+
+/**
+ * 改造 5:重启恢复。读回全部持久化的 Session 树 → 重建 sessions Map + 回灌各 Task 到队列,
+ * 然后驱动 worker 续跑(running 已归一为 queued)。awaiting_review 的工作树/暂存都在盘上,可续审。
+ */
+export async function loadPersistedOrchestration(): Promise<void> {
+  let trees: AgentSessionTree[];
+  try {
+    trees = await loadAllTrees();
+  } catch (e) {
+    console.warn("loadPersistedOrchestration: 读取失败,跳过恢复", e);
+    return;
+  }
+  let sessionCount = 0;
+  let taskCount = 0;
+  for (const tree of trees) {
+    const s = tree.session;
+    if (!s?.id || sessions.has(s.id)) continue;
+    sessions.set(s.id, { ...s, planError: s.planError ?? null });
+    sessionCount += 1;
+    for (const task of tree.tasks ?? []) {
+      rehydrateInstructTask(task);
+      taskCount += 1;
+    }
+  }
+  if (sessionCount > 0) {
+    console.log(`[atlas-api] 恢复编排树: ${sessionCount} Session / ${taskCount} Task`);
+    resumeQueue();
+  }
 }
