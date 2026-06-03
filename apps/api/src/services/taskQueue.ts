@@ -1031,7 +1031,20 @@ export async function approveTask(taskId: string): Promise<Task | { error: strin
         await gitApprove(worktreePath, `Atlas: ${t.title}`);
         await mergeWorktreeToMain(repoDir, branch);
       } catch (err) {
-        return { error: `合并落地失败: ${err instanceof Error ? err.message : String(err)}` };
+        // 合并冲突安全网:本改动基于的主线已被其它已落地改动更新(并行 worktree 改了同一批共享文件)。
+        // 丢弃这次陈旧改动 + 标失败,卡片(按 [feat:] 回连)退回「未建/开建」,由决策者基于最新主线重建。
+        // 不污染主线(mergeWorktreeToMain 已 abort)。
+        await cleanupTaskWorktree(t);
+        setStage(t, "failed", {
+          finishedAt: new Date().toISOString(),
+          error: "合并冲突:本改动基于的主线已被其它已落地改动更新,需基于最新主线重新建造。"
+        });
+        void tick();
+        return {
+          error:
+            "无法落地:本改动是在旧版主线上构建的,期间已有其它功能点落地并改了同一批文件(如 src/App.tsx)。" +
+            "已回滚本次改动,请在卡片上重新「开建」该功能点 —— 会基于最新主线重跑,即可干净落地。"
+        };
       }
       await cleanupTaskWorktree(t);
     }
