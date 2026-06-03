@@ -38,3 +38,12 @@ roles:
   - id: sys
     name: 系统
     note: 自动触发的系统行为(非人工角色)
+  - id: hr
+    name: 人事
+    note: 员工考勤/报销等人事事务(飞书集成)
+  - id: sales-director
+    name: 销售总监
+    note: 销售策略定价/套餐维护/招生漏斗治理(扁平,无区域分层)
+  - id: college-head-teacher
+    name: 大专班主任
+    note: 外部院校班主任 · 经授权只读查看指定学员成长数据
