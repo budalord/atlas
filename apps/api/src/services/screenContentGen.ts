@@ -4,19 +4,30 @@
  * "垫桩不是终点": 渲染前若屏没有真内容, 由本服务 spawn `claude -p` 把 spec → 真内容区 HTML,
  * 再交给渲染。等价于把"派 subagent 手搓内容"自动化。授权走 keychain(同用户), 无需 API key。
  *
- * 失败兜底: 生成失败时回退到桩(流程不中断), 但正常路径产出真内容。
+ * 失败兜底: 生成失败时回退到桩(流程不中断), 但正常路径产出真内容。退桩时会 console.warn 点明原因。
+ *
+ * 分工(codex vs claude):
+ * - codex(codexRunner): 跑规格/代码改动(workspace-write 多文件 batch + code-instruct)与参考图轨。
+ * - claude(本文件): 跑每页原型图内容区 HTML 的"手搓自动化"(spec → 真内容 → 渲染出图)。
+ * 两者都是后端 headless spawn,各自独立调用点;claude exec 由 findClaudeExec() 解析。
  */
 
 import { promises as fs } from "node:fs";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { DATA_ROOT } from "./fileReader";
 
 const atlasRoot = path.resolve(DATA_ROOT, "..");
 
-/** 发现 Claude Code 可执行文件(版本目录取最新)。找不到返回 null。 */
+/**
+ * 发现 Claude Code 可执行文件。优先级:
+ * 1. CLAUDE_CODE_EXECPATH 环境变量
+ * 2. Claude 桌面 App bundled 的 claude-code(版本目录取最新)
+ * 3. PATH 上的 `claude`(npm i -g @anthropic-ai/claude-code 等独立安装)
+ * 找不到返回 null。
+ */
 function findClaudeExec(): string | null {
   if (process.env.CLAUDE_CODE_EXECPATH && existsSync(process.env.CLAUDE_CODE_EXECPATH)) {
     return process.env.CLAUDE_CODE_EXECPATH;
@@ -32,6 +43,13 @@ function findClaudeExec(): string | null {
     }
   } catch {
     /* base 不存在 */
+  }
+  // PATH 兜底:claude CLI 独立装在 PATH 上
+  try {
+    const p = execFileSync("which", ["claude"], { encoding: "utf8" }).trim();
+    if (p && existsSync(p)) return p;
+  } catch {
+    /* 不在 PATH */
   }
   return null;
 }
@@ -125,5 +143,9 @@ export async function ensureRealContent(
   if (!isStubOrMissing(contentPath)) return true; // 已有真内容
   await fs.mkdir(path.dirname(contentPath), { recursive: true });
   const res = await generateScreenContent(productId, moduleName, screenId);
+  if (!res.real) {
+    // 显式日志:消除"静默退桩"。调用方会写桩兜底,但这里点明 claude 没产出真内容的原因。
+    console.warn(`[screen-content] ${moduleName}/${screenId} 退化到桩 — claude 未产出真内容: ${res.detail}`);
+  }
   return res.real;
 }
