@@ -138,7 +138,7 @@ export function ProductDetail({ product }: ProductDetailProps) {
             onClick={() => setTab("flow")}
             type="button"
           >
-            ← 返回依赖流总览
+            {phase === "in-progress" ? "← 返回开发首页" : "← 返回依赖流总览"}
           </button>
           <span className="text-sm font-semibold text-slate-900">{TAB_LABELS[tab]}</span>
           {readOnly ? (
@@ -148,7 +148,29 @@ export function ProductDetail({ product }: ProductDetailProps) {
       ) : null}
 
       {tab === "flow" ? (
-        <ProductFlowOverview productId={product.id} readOnly={readOnly} onDrill={setTab} />
+        phase === "in-progress" ? (
+          // 开发中:首页 = 驾驶舱(上方),立项期那套总览(脑图/原型墙/角色实体矩阵)不再堆首页;
+          // 只留一条细窄的「查阅规格/原型」入口,需要时再点进去。
+          <section className="border-b border-slate-200 bg-white px-6 py-3">
+            <span className="mr-2 text-[11px] text-slate-400">需要查阅规格 / 原型?</span>
+            <span className="inline-flex flex-wrap gap-1.5">
+              {tabs
+                .filter((t) => t.key !== "flow")
+                .map((t) => (
+                  <button
+                    className="rounded border border-slate-200 px-2.5 py-1 text-[12px] text-slate-700 hover:bg-slate-50"
+                    key={t.key}
+                    onClick={() => setTab(t.key)}
+                    type="button"
+                  >
+                    {TAB_LABELS[t.key]}
+                  </button>
+                ))}
+            </span>
+          </section>
+        ) : (
+          <ProductFlowOverview productId={product.id} readOnly={readOnly} onDrill={setTab} />
+        )
       ) : null}
       {tab === "features" ? (
         <FeatureTab productId={product.id} readOnly={readOnly} />
