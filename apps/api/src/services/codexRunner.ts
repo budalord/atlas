@@ -7,7 +7,8 @@ import type { ChangedFile } from "@atlas/shared";
 import {
   snapshotProductFiles,
   diffSnapshot,
-  stageBackups
+  stageBackups,
+  type Snapshot
 } from "./changesetTracker";
 
 export interface CodexResult {
@@ -292,6 +293,11 @@ export interface CodexMultiFileOptions {
   timeoutMs?: number;
   /** v0.2c §5.6a: 透传给 runCodex 的实时 step 回调 */
   onStep?: (label: string) => void;
+  /**
+   * 改造 2:外部传入的基线 snapshot。提供时用它当 before(多轮 execute→fix 累积 diff 从同一
+   * 基线算,changeset 反映从原始态到当前的全量变更);不提供则函数内部即时 snapshot(单轮旧行为)。
+   */
+  baselineSnapshot?: Snapshot;
 }
 
 /**
@@ -359,7 +365,7 @@ productId 从 \`pwd\` 取 (cwd 是 data/products/<id>/)。
 export async function runCodexMultiFile(
   opts: CodexMultiFileOptions
 ): Promise<CodexMultiFileResult> {
-  const before = await snapshotProductFiles(opts.cwd);
+  const before = opts.baselineSnapshot ?? (await snapshotProductFiles(opts.cwd));
   const raw = await runCodex({
     prompt: V02B1_BATCH_PREAMBLE + opts.prompt,
     cwd: opts.cwd,

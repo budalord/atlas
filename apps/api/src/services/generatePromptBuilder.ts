@@ -1276,6 +1276,103 @@ export async function buildCodeInstructPrompt(
   return { prompt };
 }
 
+/**
+ * 改造 2 监管 agent「validate」prompt(只读复核)。
+ * 执行 agent 已把改动落盘(规格 md 或代码),监管 agent 只读核对:contract / 一致性 /
+ * (代码)正确性可编译。输出**严格 JSON** {"pass":bool,"issues":[...]}。
+ */
+export async function buildValidatePrompt(
+  productId: string,
+  instruction: string,
+  changedPaths: string[],
+  mode: "spec" | "code"
+): Promise<{ prompt: string }> {
+  const checklist =
+    mode === "spec"
+      ? `- 每个改动文件按对应 contract 自查(docs/<scope>-contract.md):feature/entity/usecase/screen/actor
+  的 frontmatter 必填项、字段表列数(feature 6 列)、id 命名(entity PascalCase / 其余 kebab-case)。
+- 跨文件一致性:被引用的 id 真实存在;revise 任务 needs_revision 已清、反馈池已处理。
+- 是否真的落实了"决策者需求",还是答非所问 / 漏改。`
+      : `- **语法逐行核对**:括号 () / 大括号 {} / 方括号 [] 是否成对闭合、函数签名与调用是否完整、
+  字符串/注释是否闭合、引用的变量/函数/模块/路径是否真实存在。**任何语法错误一律 pass=false。**
+- 与需求一致:确实实现了"决策者需求",非答非所问 / 半成品 / 占位空壳。
+- 自洽:新增/改动的代码与仓内既有约定、相邻文件风格一致;无明显逻辑漏洞。`;
+
+  const prompt = [
+    `# Atlas 监管 agent · 只读复核(改造 2)`,
+    "",
+    `你是**只读复核 agent**(codex read-only 沙箱,不能改文件)。一个执行 agent 刚做了下面这组改动,`,
+    `你要核对它是否合格,够格才放行进人审,不够格则列出**必须修复**的问题回吐给执行 agent 自修。`,
+    "",
+    "## 决策者需求(改动应满足的目标)",
+    instruction.trim() || "(空)",
+    "",
+    "## 本次改动的文件",
+    changedPaths.length > 0 ? changedPaths.map((p) => `- ${p}`).join("\n") : "(无)",
+    "",
+    `## 强制步骤(不照做 = 失职)
+1. **逐个文件用 \`cat <path>\` 打印完整内容**(或 Read 工具),把每个改动文件从头到尾读一遍。
+   只看 \`git status\` / 文件名 / 目录列表就下结论 **绝对禁止** —— 那样你根本没看到改了什么。
+2. 对照下面的复核清单,逐条核对你**亲眼读到的内容**。
+3. 发现任何不合格项就 pass=false 并写进 issues。`,
+    "",
+    "## 复核清单",
+    checklist,
+    "",
+    `## 输出格式(严格 · 只输出一个 \`\`\`json 代码块,无任何前后缀)
+\`\`\`json
+{ "pass": true, "issues": [] }
+\`\`\`
+- pass=true:改动合格,可进人审。issues 留空数组。
+- pass=false:issues 列出**具体、可执行**的问题(点名文件/字段/符号),执行 agent 按它逐条修。
+- 不确定 / 吹毛求疵的不算 issue;只拦真正会出问题的(违反 contract、编译/语法错、漏改需求、引用悬空)。`
+  ].join("\n");
+
+  return { prompt };
+}
+
+/**
+ * 改造 2 监管 agent「fix」prompt。复核打回后,把 issues 回吐执行 agent 自修。
+ * - spec 模式:返回正文(由 runCodexMultiFile 自动前置 V02B1 batch 强制自校验 preamble)。
+ * - code 模式:自带代码运行模式框,直接交 runCodex(workspace-write)。
+ */
+export function buildFixPrompt(
+  instruction: string,
+  issues: string[],
+  mode: "spec" | "code",
+  repoDir?: string
+): { prompt: string } {
+  const issueList = issues.length > 0 ? issues.map((s, i) => `${i + 1}. ${s}`).join("\n") : "(复核未给出具体条目,请整体复查并修正不合格处)";
+  const body = [
+    "## 复核打回 · 必须修复",
+    "上一轮你的改动被只读监管 agent 复核打回。请在当前工作区**直接修复**下列问题(Edit/Write),",
+    "保持原需求意图,最小改动,不要推倒重来、不要顺手改无关文件。",
+    "",
+    "**优先级**:复核发现的问题(尤其语法/编译/contract 错误)**高于**下面『原始需求』里的字面写法。",
+    "若原始需求的字面内容(如要求逐字写入的某段)本身就是问题根源,以**修正问题**为准,不要为遵守字面而保留错误。",
+    "",
+    "### 原始需求(意图参考,字面写法可被上面的复核问题覆盖)",
+    instruction.trim() || "(空)",
+    "",
+    "### 复核发现的问题(逐条修复)",
+    issueList
+  ].join("\n");
+
+  if (mode === "code") {
+    const prompt = [
+      `# Atlas 开发中·应用代码层 修复任务(改造 2)`,
+      "",
+      `你在 \`codex exec -s workspace-write\` 非交互沙箱内,cwd 即真码仓(${repoDir ?? "当前目录"}),无 human-in-loop。`,
+      `直接用 Edit/Write 落盘修复,不要请求确认、不要只输出 diff。改动由 git diff 反推进人审。`,
+      "",
+      body
+    ].join("\n");
+    return { prompt };
+  }
+  // spec:正文即可,preamble 由 runCodexMultiFile 前置
+  return { prompt: body };
+}
+
 /** 规划器解析出的单个 Task。 */
 export interface PlannedTask {
   title: string;

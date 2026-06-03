@@ -42,9 +42,11 @@ import {
   buildUseCaseGeneratePrompt,
   buildConventionsGeneratePrompt,
   buildProductInstructPrompt,
-  buildCodeInstructPrompt
+  buildCodeInstructPrompt,
+  buildValidatePrompt,
+  buildFixPrompt
 } from "./generatePromptBuilder";
-import { restoreFromBackups, clearBackups } from "./changesetTracker";
+import { restoreFromBackups, clearBackups, snapshotProductFiles, type Snapshot } from "./changesetTracker";
 import { gitDiffChangedFiles, gitEnsureClean, gitApprove, gitReject } from "./gitChangeset";
 import { flagRevisedScreensForReprototype } from "./prototypeQueue";
 import { dataPath } from "./fileReader";
@@ -520,11 +522,112 @@ async function runBatchRevise(t: BatchTask, builder: PromptBuilder): Promise<voi
   });
 }
 
+// ───────────── 改造 2:监管 agent(execute→validate→fix 多 Plan 环) ─────────────
+
+/** fix 轮上限(execute 之后最多 fix 几次)。 */
+const MAX_FIX_ROUNDS = 2;
+
+/** 从只读复核 agent 输出里解析裁决。解析失败保守放行(不因格式问题卡正常改动)。 */
+function parseVerdict(output: string): { pass: boolean; issues: string[] } {
+  const fence = output.match(/```(?:json)?\s*\n([\s\S]*?)\n```/i);
+  const raw = fence ? fence[1] : output;
+  try {
+    const obj = JSON.parse(raw.trim());
+    const pass = obj?.pass === true;
+    const issues = Array.isArray(obj?.issues)
+      ? (obj.issues as unknown[]).filter((x): x is string => typeof x === "string" && x.trim().length > 0)
+      : [];
+    return { pass: pass || issues.length === 0, issues };
+  } catch {
+    return { pass: true, issues: [] };
+  }
+}
+
+interface SuperviseCtx {
+  productId: string;
+  cwd: string;
+  mode: "spec" | "code";
+  instruction: string;
+  /** 跑一次修复 agent,返回从原始基线算的累积 changeset。 */
+  reExecuteFix: (
+    fixPrompt: string,
+    onStep: (label: string) => void
+  ) => Promise<{ ok: boolean; changedFiles: ChangedFile[]; error: string }>;
+}
+
+/**
+ * execute 之后、进闸之前的监管环:validate(只读复核)→ 不过则 fix(执行 agent 自修)→ 再 validate。
+ * 把 validate/fix Plan 追加到 t.plans(现有 onStep/TaskStep 流式回显,前端已能渲染 plan.kind)。
+ * 返回最终(累积)changeset。复用现有三态闸:无论复核是否最终通过,都进 awaiting_review 由人裁决。
+ */
+async function runSupervision(
+  t: (ProductInstructTask | CodeInstructTask) & { payload: BatchPayload },
+  initialChanged: ChangedFile[],
+  ctx: SuperviseCtx
+): Promise<ChangedFile[]> {
+  if (!t.plans) t.plans = [];
+  let changed = initialChanged;
+  const pushStep = (plan: TaskPlan) => (label: string) => {
+    plan.steps.push({ ts: new Date().toISOString(), label });
+    if (plan.steps.length > 40) plan.steps.splice(0, plan.steps.length - 40);
+    bumpDataVersion(`task:${t.id}:step`);
+  };
+
+  for (let round = 0; round <= MAX_FIX_ROUNDS; round++) {
+    // —— validate Plan(只读复核) ——
+    const vplan: TaskPlan = { id: randomUUID(), kind: "validate", state: "running", steps: [] };
+    t.plans.push(vplan);
+    bumpDataVersion(`task:${t.id}:step`);
+    let verdict: { pass: boolean; issues: string[] };
+    try {
+      const { prompt } = await buildValidatePrompt(ctx.productId, ctx.instruction, changed.map((c) => c.path), ctx.mode);
+      const vres = await runCodex({
+        prompt,
+        cwd: ctx.cwd,
+        timeoutMs: 10 * 60_000,
+        sandbox: "read-only",
+        taskId: t.id,
+        onStep: pushStep(vplan)
+      });
+      verdict = vres.ok ? parseVerdict(vres.output) : { pass: true, issues: [] };
+    } catch {
+      verdict = { pass: true, issues: [] }; // 复核器自身异常 → 放行(人审兜底)
+    }
+    vplan.changedFiles = changed;
+    pushStep(vplan)(verdict.pass ? "复核通过 ✓" : `复核打回:${verdict.issues.length} 条问题`);
+    vplan.state = verdict.pass ? "finished" : "failed";
+    bumpDataVersion(`task:${t.id}:step`);
+
+    if (verdict.pass) return changed;
+    if (round === MAX_FIX_ROUNDS) return changed; // 超界:带问题进闸,人裁决
+
+    // —— fix Plan(执行 agent 自修) ——
+    const fplan: TaskPlan = { id: randomUUID(), kind: "fix", state: "running", steps: [] };
+    t.plans.push(fplan);
+    bumpDataVersion(`task:${t.id}:step`);
+    const { prompt: fixPrompt } = buildFixPrompt(
+      ctx.instruction,
+      verdict.issues,
+      ctx.mode,
+      ctx.mode === "code" ? ctx.cwd : undefined
+    );
+    const fr = await ctx.reExecuteFix(fixPrompt, pushStep(fplan));
+    if (!fr.ok) {
+      fplan.state = "failed";
+      return changed; // 修复失败,带原 changeset 进闸
+    }
+    fplan.changedFiles = fr.changedFiles;
+    fplan.state = "finished";
+    changed = fr.changedFiles;
+  }
+  return changed;
+}
+
 /**
  * 开发中阶段「需求 → 改规格」执行(Session 树里的单个 Task)。
  * 与 runBatchRevise 同构,差别:prompt 用 buildProductInstructPrompt(带自由文本指令),
  * 且把 codex 的实时 step 写进该 Task 的 execute Plan(plan.steps)而非 task 顶层。
- * 跑完仍落入现有三态闸(awaiting_review),审核走现有 ReviewChangesetModal。
+ * 跑完先过监管环(改造 2),再落入现有三态闸(awaiting_review),审核走现有 ReviewChangesetModal。
  */
 async function runProductInstruct(
   t: ProductInstructTask & { payload: BatchPayload }
@@ -551,17 +654,21 @@ async function runProductInstruct(
     return;
   }
 
+  // 改造 2:基线 snapshot 取一次,execute + 各轮 fix 都从它算累积 changeset
+  const cwd = t.payload.productDir;
+  const baseline: Snapshot = await snapshotProductFiles(cwd);
+  const onExecStep = (label: string) => {
+    plan.steps.push({ ts: new Date().toISOString(), label });
+    if (plan.steps.length > 40) plan.steps.splice(0, plan.steps.length - 40);
+    bumpDataVersion(`task:${t.id}:step`);
+  };
   const result = await runCodexMultiFile({
     prompt,
-    cwd: t.payload.productDir,
+    cwd,
     taskId: t.id,
     timeoutMs: 30 * 60_000,
-    onStep: (label: string) => {
-      const ts = new Date().toISOString();
-      plan.steps.push({ ts, label });
-      if (plan.steps.length > 40) plan.steps.splice(0, plan.steps.length - 40);
-      bumpDataVersion(`task:${t.id}:step`);
-    }
+    baselineSnapshot: baseline,
+    onStep: onExecStep
   });
 
   if (!result.ok) {
@@ -584,10 +691,30 @@ async function runProductInstruct(
 
   plan.changedFiles = result.changedFiles;
   plan.state = "finished";
-  const summaryLine = summarizeBatchTask(result.changedFiles);
+
+  // 监管环:validate → fix → … (改造 2)
+  const finalChanged = await runSupervision(t, result.changedFiles, {
+    productId: t.payload.productId,
+    cwd,
+    mode: "spec",
+    instruction: t.payload.instruction ?? "",
+    reExecuteFix: async (fixPrompt, onStep) => {
+      const fr = await runCodexMultiFile({
+        prompt: fixPrompt,
+        cwd,
+        taskId: t.id,
+        timeoutMs: 30 * 60_000,
+        baselineSnapshot: baseline,
+        onStep
+      });
+      return { ok: fr.ok, changedFiles: fr.changedFiles, error: fr.error };
+    }
+  });
+
+  const summaryLine = summarizeBatchTask(finalChanged);
   setStage(t, "awaiting_review", {
     finishedAt: new Date().toISOString(),
-    changedFiles: result.changedFiles,
+    changedFiles: finalChanged,
     summaryLine
   });
 }
@@ -686,10 +813,36 @@ async function runCodeInstruct(
 
   plan.changedFiles = changedFiles;
   plan.state = "finished";
-  const summaryLine = `改动 ${changedFiles.length} 个文件(代码)`;
+
+  // 监管环:validate → fix → …(改造 2)。code 的 changeset 始终是 git diff HEAD,天然累积。
+  const finalChanged = await runSupervision(t, changedFiles, {
+    productId: t.payload.productId,
+    cwd: repoDir,
+    mode: "code",
+    instruction: t.payload.instruction ?? "",
+    reExecuteFix: async (fixPrompt, onStep) => {
+      const fr = await runCodex({
+        prompt: fixPrompt,
+        cwd: repoDir,
+        timeoutMs: 30 * 60_000,
+        sandbox: "workspace-write",
+        taskId: t.id,
+        onStep
+      });
+      if (!fr.ok) return { ok: false, changedFiles, error: fr.error };
+      try {
+        const c = await gitDiffChangedFiles(repoDir);
+        return { ok: true, changedFiles: c, error: "" };
+      } catch (err) {
+        return { ok: false, changedFiles, error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+  });
+
+  const summaryLine = `改动 ${finalChanged.length} 个文件(代码)`;
   setStage(t, "awaiting_review", {
     finishedAt: new Date().toISOString(),
-    changedFiles,
+    changedFiles: finalChanged,
     summaryLine
   });
 }

@@ -47,17 +47,42 @@ async function isGitWorkTree(dir: string): Promise<boolean> {
 }
 
 /**
+ * 解析 productId 的 repo 来源(优先级):
+ * 1. 环境变量 ATLAS_REPO_<PRODUCTID>(大写、非字母数字转 _)
+ * 2. 本地文件 ~/.atlas/products/<id>/repo(纯文本一行 URL)—— 永不入库,适合私有 ERP 仓
+ * 3. meta.repo(committed;仓库要 public 时这里通常留 null,避免把私有码仓地址入库)
+ * 都没有 → null。
+ */
+async function resolveRepoUrl(productId: string): Promise<string | null> {
+  const envKey = `ATLAS_REPO_${productId.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;
+  const fromEnv = process.env[envKey]?.trim();
+  if (fromEnv) return fromEnv;
+
+  const localFile = path.join(os.homedir(), ".atlas", "products", productId, "repo");
+  try {
+    const txt = (await fs.readFile(localFile, "utf8")).trim();
+    if (txt) return txt.split(/\r?\n/)[0].trim();
+  } catch {
+    /* 无本地 repo 文件 */
+  }
+
+  const meta = await loadMeta(productId);
+  return meta?.repo?.trim() || null;
+}
+
+/**
  * 解析 productId 的本地码仓路径,必要时 clone。
  * - meta.repo 未配置 → 抛错(code-instruct 需要真码仓)
  * - 本地已是 git 工作树 → 直接返回
  * - 本地不存在 → git clone <repo> <dir>
  */
 export async function resolveRepoDir(productId: string): Promise<string> {
-  const meta = await loadMeta(productId);
-  const repo = meta?.repo?.trim();
+  const repo = await resolveRepoUrl(productId);
   if (!repo) {
     throw new Error(
-      `产品 ${productId} 未配置 meta.repo —— 代码任务需要真码仓,请在 meta.yml 填 repo: <owner/name 或 URL>`
+      `产品 ${productId} 未配置码仓 —— 代码任务需要真码仓。配置任一:` +
+        `环境变量 ATLAS_REPO_${productId.toUpperCase().replace(/[^A-Z0-9]/g, "_")} / ` +
+        `本地文件 ~/.atlas/products/${productId}/repo(一行 URL,不入库)/ meta.yml 的 repo`
     );
   }
   const dir = repoDirFor(productId);
