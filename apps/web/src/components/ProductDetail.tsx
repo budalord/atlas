@@ -121,14 +121,20 @@ export function ProductDetail({ product }: ProductDetailProps) {
         </dl>
         ) : null}
       </section>
-      <ReviewDashboard
-        productId={product.id}
-        rightSlot={
-          phase !== "archived" ? <RecentActivityStrip compact productId={product.id} /> : undefined
-        }
-      />
-      {phase !== "archived" ? <AgentTasksPanel productId={product.id} /> : null}
-      {/* 开发中阶段:决策者驾驶舱(搭骨架 / 建造看板 / 等你拍板 / 编排树,只在 in-progress 出现) */}
+      {/* 立项审查进度 / Agent 活动(含渲染监控):立项口径,开发中对决策者是噪音 → in-progress 隐藏。
+          开发期的进度与活动由驾驶舱(建造看板 + 全部编排明细)承载。 */}
+      {phase !== "in-progress" ? (
+        <>
+          <ReviewDashboard
+            productId={product.id}
+            rightSlot={
+              phase !== "archived" ? <RecentActivityStrip compact productId={product.id} /> : undefined
+            }
+          />
+          {phase !== "archived" ? <AgentTasksPanel productId={product.id} /> : null}
+        </>
+      ) : null}
+      {/* 开发中阶段:决策者驾驶舱 = 首页主体(搭骨架 / 建造看板 / 等你拍板 / 编排树) */}
       {phase === "in-progress" ? <DevCockpit productId={product.id} /> : null}
 
       {tab !== "flow" && tabs.some((t) => t.key === "flow") ? (

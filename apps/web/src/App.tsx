@@ -6,6 +6,7 @@ import { ProductDetail } from "./components/ProductDetail";
 import { ProductList } from "./components/ProductList";
 import { TaskQueueWidget } from "./components/TaskQueueWidget";
 import { subscribeDataChange } from "./lib/dataChangeBus";
+import { statusToPhase } from "./lib/productPhase";
 import { IntakeDetail } from "./pages/IntakeDetail";
 import { useIntakeStore } from "./stores/intakeStore";
 import { useProductStore } from "./stores/productStore";
@@ -80,9 +81,14 @@ function OverviewPage() {
   }, [fetchAll]);
 
   const selectedProduct = products.find((product) => product.id === selectedProductId) ?? null;
+  // 开发中(in-progress):右侧「契约 / CLAUDE.md」对决策者无操作价值,隐藏并把宽度让给驾驶舱。
+  const hideAside = selectedProduct ? statusToPhase(selectedProduct.meta.status) === "in-progress" : false;
+  const gridCols = hideAside
+    ? "grid-cols-1 lg:grid-cols-[320px_minmax(0,1fr)]"
+    : "grid-cols-1 lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)_360px]";
 
   return (
-    <div className="grid min-h-0 grid-cols-1 lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)_360px]">
+    <div className={`grid min-h-0 ${gridCols}`}>
       <ProductList onSelect={selectProduct} products={products} selectedProductId={selectedProductId} />
       <div className="min-h-0">
         {/* 不再 overflow-auto — 让 window 滚动, tab 内的 sticky-top 才能对 viewport 生效 */}
@@ -95,10 +101,12 @@ function OverviewPage() {
           <ProductDetail product={selectedProduct} />
         )}
       </div>
-      <aside className="sticky top-0 max-h-screen min-h-0 self-start overflow-y-auto border-t border-slate-200 bg-white xl:border-l xl:border-t-0">
-        <ContractList contracts={contracts} />
-        <AgentInbox claudeDoc={claudeDoc} />
-      </aside>
+      {hideAside ? null : (
+        <aside className="sticky top-0 max-h-screen min-h-0 self-start overflow-y-auto border-t border-slate-200 bg-white xl:border-l xl:border-t-0">
+          <ContractList contracts={contracts} />
+          <AgentInbox claudeDoc={claudeDoc} />
+        </aside>
+      )}
     </div>
   );
 }
