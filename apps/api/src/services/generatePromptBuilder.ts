@@ -1373,6 +1373,52 @@ export function buildFixPrompt(
   return { prompt: body };
 }
 
+/**
+ * 改造 3:应用代码层 Session 规划器(只读)。把一句话代码需求拆成 1..N 个**相互独立**的代码 Task,
+ * 每个 Task 后续在自己的 git worktree 里并行跑、各自审、各自合并回主线。
+ * 关键:只在子任务**互不依赖、不大面积改同一文件**时才拆(并行合并要避免冲突);否则出 1 个 Task。
+ * 输出严格 JSON {"tasks":[{title,scopedInstruction,targetHint}]}。
+ */
+export async function buildCodeSessionPlanPrompt(
+  productId: string,
+  instruction: string,
+  repoDir: string
+): Promise<{ prompt: string }> {
+  const meta = await loadMeta(productId);
+  const index = await moduleFeatureIndex(productId);
+
+  const prompt = [
+    `# Atlas 开发中·应用代码层 需求规划(只读)`,
+    "",
+    `你是代码层**规划器**。cwd 是真码仓(${repoDir}),你可以只读浏览仓内结构。`,
+    `把决策者的一句话代码需求拆成 1..N 个**相互独立**的代码 Task —— 每个 Task 会在自己的 git`,
+    `worktree 里并行执行、独立审核、独立合并回主线。`,
+    "",
+    `## 拆分原则(并行安全第一)
+- **只在子任务彼此独立时才拆**:不同文件/不同模块/互不依赖。会改到**同一文件**或有先后依赖的,**不要拆**(并行合并会冲突)。
+- 简单需求(单文件 / 一处改动)→ **1 个 Task**。
+- 每个 \`scopedInstruction\` 要自包含(执行 agent 看不到原句)。\`targetHint\` 可选,点名预计涉及的文件/目录。
+- 宁可少拆;不确定是否独立就合成 1 个。`,
+    "",
+    "## 决策者需求",
+    instruction.trim(),
+    "",
+    "## 当前产品(业务上下文)",
+    describeProduct(meta, productId),
+    "",
+    "## 规格全景(模块 → 功能点 · 业务上下文)",
+    index,
+    "",
+    `## 输出格式(严格 · 只输出一个 \`\`\`json 代码块)
+\`\`\`json
+{ "tasks": [ { "title": "简短标题", "scopedInstruction": "自包含子指令", "targetHint": "可选:涉及文件/目录" } ] }
+\`\`\`
+- 至少 1 个;无法独立拆分时就 1 个,scopedInstruction = 原需求。`
+  ].join("\n");
+
+  return { prompt };
+}
+
 /** 规划器解析出的单个 Task。 */
 export interface PlannedTask {
   title: string;

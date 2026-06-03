@@ -47,7 +47,8 @@ import {
   buildFixPrompt
 } from "./generatePromptBuilder";
 import { restoreFromBackups, clearBackups, snapshotProductFiles, type Snapshot } from "./changesetTracker";
-import { gitDiffChangedFiles, gitEnsureClean, gitApprove, gitReject } from "./gitChangeset";
+import { gitDiffChangedFiles, gitApprove } from "./gitChangeset";
+import { createWorktree, removeWorktree, mergeWorktreeToMain } from "./worktreeManager";
 import { flagRevisedScreensForReprototype } from "./prototypeQueue";
 import { dataPath } from "./fileReader";
 import { appendTaskHistory, buildHistoryRecord } from "./taskHistory";
@@ -80,8 +81,12 @@ interface BatchPayload {
   instruction?: string;
   /** product-instruct / code-instruct 用:所属 Session id(独立入队时为空串) */
   sessionId?: string;
-  /** code-instruct 用:真码仓本地工作目录(cwd 指向这里,而非 productDir) */
+  /** code-instruct 用:真码仓本地主 clone */
   repoDir?: string;
+  /** 改造3:本 Task 的 worktree 隔离目录(cwd 指向这里) */
+  worktreePath?: string;
+  /** 改造3:worktree 分支名 */
+  branch?: string;
 }
 
 type InternalTask =
@@ -100,7 +105,15 @@ type InternalTask =
   | (CodeInstructTask & { payload: BatchPayload });
 
 const tasks: InternalTask[] = [];
-let running = false;
+/**
+ * 改造 3:并发模型。
+ * - 非代码任务(规格 batch / product-instruct):共享 productDir + .atlas-staging,**串行**(至多 1)。
+ * - 代码任务(code-instruct):每 Task 独立 git worktree 隔离 → **有界并发**(至多 MAX_CODE_CONCURRENT)。
+ * 两类可同时跑(各自工作目录不同,互不冲突)。
+ */
+let runningNonCode = false;
+let activeCodeCount = 0;
+const MAX_CODE_CONCURRENT = 2;
 
 /**
  * 任务变更监听器(改造 5 持久化用)。sessionOrchestrator 注册一个,在 Task 状态/编排变化时
@@ -172,6 +185,8 @@ function publicView(t: InternalTask): Task {
       instruction: t.payload.instruction ?? "",
       sessionId: t.payload.sessionId ?? "",
       repoDir: t.payload.repoDir,
+      worktreePath: t.payload.worktreePath,
+      branch: t.payload.branch,
       plans,
       steps: plans.flatMap((p) => p.steps)
     } as CodeInstructTask;
@@ -220,12 +235,15 @@ export function rehydrateInstructTask(view: InstructTask): void {
     steps: p.steps ?? []
   })) as TaskPlan[];
   const isCode = view.kind === "code-instruct";
+  const codeView = view as CodeInstructTask;
   const payload: BatchPayload = {
     productId: view.productId,
     productDir: dataPath("products", view.productId),
     instruction: view.instruction,
     sessionId: view.sessionId,
-    ...(isCode ? { repoDir: (view as CodeInstructTask).repoDir } : {})
+    ...(isCode
+      ? { repoDir: codeView.repoDir, worktreePath: codeView.worktreePath, branch: codeView.branch }
+      : {})
   };
   const t = {
     id: view.id,
@@ -296,33 +314,35 @@ export function enqueueRefine(args: EnqueueArgs): RefineTask {
   return publicView(t) as FeatureRefineTask;
 }
 
-async function tick(): Promise<void> {
-  if (running) return;
-  const next = tasks.find((t) => {
-    if (t.stage !== "queued") return false;
-    // code-instruct(phase1 无 worktree 隔离):同一码仓里若已有未结的 code 任务
-    // (running/awaiting_review,工作树带未提交改动),先不并起,等它被 approve/reject 落定。
+/**
+ * 调度:扫描 queued 任务,在并发上限内拉起。非代码串行(runningNonCode),代码有界并发
+ * (activeCodeCount<MAX_CODE_CONCURRENT)。worktree 隔离 → 同仓多 code 任务可并行,无需旧的串行守卫。
+ * 同步函数:launch 是 fire-and-forget,flag 在循环里同步置位,防同一轮重复拉起。
+ */
+function tick(): void {
+  for (const t of tasks) {
+    if (t.stage !== "queued") continue;
     if (t.kind === "code-instruct") {
-      const repoDir = t.payload.repoDir;
-      const busy = tasks.some(
-        (o) =>
-          o !== t &&
-          o.kind === "code-instruct" &&
-          o.payload.repoDir === repoDir &&
-          (o.stage === "running" || o.stage === "awaiting_review")
-      );
-      if (busy) return false;
+      if (activeCodeCount >= MAX_CODE_CONCURRENT) continue;
+      activeCodeCount += 1;
+      void launch(t);
+    } else {
+      if (runningNonCode) continue;
+      runningNonCode = true;
+      void launch(t);
     }
-    return true;
-  });
-  if (!next) return;
-  running = true;
+  }
+}
+
+/** 跑一个任务并在结束后释放并发额度 + 重新调度。 */
+async function launch(t: InternalTask): Promise<void> {
+  const isCode = t.kind === "code-instruct";
   try {
-    await runOne(next);
+    await runOne(t);
   } finally {
-    running = false;
-    // 看是否还有下一个
-    void tick();
+    if (isCode) activeCodeCount -= 1;
+    else runningNonCode = false;
+    tick();
   }
 }
 
@@ -719,6 +739,13 @@ async function runProductInstruct(
   });
 }
 
+/** 改造3:清理某 code Task 的 worktree(幂等,best-effort)。 */
+async function cleanupTaskWorktree(t: CodeInstructTask & { payload: BatchPayload }): Promise<void> {
+  const { repoDir, worktreePath, branch } = t.payload;
+  if (!repoDir || !worktreePath || !branch) return;
+  await removeWorktree(repoDir, t.id, worktreePath, branch).catch(() => undefined);
+}
+
 /**
  * 开发中(应用代码层)「需求 → 改真码仓代码」执行(Session 树里的单个 Task)。
  * 与 runProductInstruct 同构,差别:
@@ -741,22 +768,26 @@ async function runCodeInstruct(
   const plan = t.plans[0];
   plan.state = "running";
 
-  // 串行保证下:此刻同仓无其它未结 code 任务(tick 守卫),把工作树重置到干净 HEAD,
-  // 清掉上一个 failed 任务可能残留的脏改动,确保 git diff 只反映本任务。
+  // 改造3:为本 Task 建独立 worktree(从主 clone 当前 HEAD 切分支),cwd 指向 worktree。
+  // 同仓多 Task 各自工作树并行,互不写冲突。失败/终态时清理。
+  let worktreePath: string;
   try {
-    await gitEnsureClean(repoDir);
+    const wt = await createWorktree(repoDir, t.id);
+    worktreePath = wt.worktreePath;
+    t.payload.worktreePath = wt.worktreePath;
+    t.payload.branch = wt.branch;
   } catch (err) {
     plan.state = "failed";
     setStage(t, "failed", {
       finishedAt: new Date().toISOString(),
-      error: `git 清理工作树失败: ${err instanceof Error ? err.message : String(err)}`
+      error: `创建 worktree 失败: ${err instanceof Error ? err.message : String(err)}`
     });
     return;
   }
 
   let prompt: string;
   try {
-    const built = await buildCodeInstructPrompt(t.payload.productId, t.payload.instruction ?? "", repoDir);
+    const built = await buildCodeInstructPrompt(t.payload.productId, t.payload.instruction ?? "", worktreePath);
     prompt = built.prompt;
   } catch (err) {
     plan.state = "failed";
@@ -769,7 +800,7 @@ async function runCodeInstruct(
 
   const result = await runCodex({
     prompt,
-    cwd: repoDir,
+    cwd: worktreePath,
     timeoutMs: 30 * 60_000,
     sandbox: "workspace-write",
     taskId: t.id,
@@ -783,6 +814,7 @@ async function runCodeInstruct(
 
   if (!result.ok) {
     plan.state = "failed";
+    await cleanupTaskWorktree(t);
     setStage(t, "failed", {
       finishedAt: new Date().toISOString(),
       error: result.error || "codex run failed"
@@ -792,9 +824,10 @@ async function runCodeInstruct(
 
   let changedFiles: ChangedFile[];
   try {
-    changedFiles = await gitDiffChangedFiles(repoDir);
+    changedFiles = await gitDiffChangedFiles(worktreePath);
   } catch (err) {
     plan.state = "failed";
+    await cleanupTaskWorktree(t);
     setStage(t, "failed", {
       finishedAt: new Date().toISOString(),
       error: `git diff failed: ${err instanceof Error ? err.message : String(err)}`
@@ -804,6 +837,7 @@ async function runCodeInstruct(
 
   if (changedFiles.length === 0) {
     plan.state = "finished";
+    await cleanupTaskWorktree(t);
     setStage(t, "completed", {
       finishedAt: new Date().toISOString(),
       summaryLine: "本次无代码变更(agent 判断无需改动)"
@@ -814,16 +848,16 @@ async function runCodeInstruct(
   plan.changedFiles = changedFiles;
   plan.state = "finished";
 
-  // 监管环:validate → fix → …(改造 2)。code 的 changeset 始终是 git diff HEAD,天然累积。
+  // 监管环:validate → fix → …(改造 2)。code 的 changeset 始终是 worktree 内 git diff HEAD,天然累积。
   const finalChanged = await runSupervision(t, changedFiles, {
     productId: t.payload.productId,
-    cwd: repoDir,
+    cwd: worktreePath,
     mode: "code",
     instruction: t.payload.instruction ?? "",
     reExecuteFix: async (fixPrompt, onStep) => {
       const fr = await runCodex({
         prompt: fixPrompt,
-        cwd: repoDir,
+        cwd: worktreePath,
         timeoutMs: 30 * 60_000,
         sandbox: "workspace-write",
         taskId: t.id,
@@ -831,7 +865,7 @@ async function runCodeInstruct(
       });
       if (!fr.ok) return { ok: false, changedFiles, error: fr.error };
       try {
-        const c = await gitDiffChangedFiles(repoDir);
+        const c = await gitDiffChangedFiles(worktreePath);
         return { ok: true, changedFiles: c, error: "" };
       } catch (err) {
         return { ok: false, changedFiles, error: err instanceof Error ? err.message : String(err) };
@@ -990,14 +1024,16 @@ export async function approveTask(taskId: string): Promise<Task | { error: strin
       return { error: err instanceof Error ? err.message : String(err) };
     }
   } else if (t.kind === "code-instruct") {
-    // 代码任务:approve = git commit 落地(改动已在工作树)
-    const repoDir = t.payload.repoDir;
-    if (repoDir) {
+    // 代码任务:approve = 在 worktree 分支提交 → 合并回主 clone 主线 → 清理 worktree
+    const { repoDir, worktreePath, branch } = t.payload;
+    if (repoDir && worktreePath && branch) {
       try {
-        await gitApprove(repoDir, `Atlas: ${t.title}`);
+        await gitApprove(worktreePath, `Atlas: ${t.title}`);
+        await mergeWorktreeToMain(repoDir, branch);
       } catch (err) {
-        return { error: `git commit failed: ${err instanceof Error ? err.message : String(err)}` };
+        return { error: `合并落地失败: ${err instanceof Error ? err.message : String(err)}` };
       }
+      await cleanupTaskWorktree(t);
     }
   } else {
     // batch kinds: 文件已被 agent workspace-write 落盘, approve = 清 backup
@@ -1107,15 +1143,8 @@ export async function rejectTask(taskId: string): Promise<Task | { error: string
     const filePath = featureFilePath(t.payload.productId, t.payload.moduleName, t.payload.featureId);
     await fs.unlink(`${filePath}.draft`).catch(() => undefined);
   } else if (t.kind === "code-instruct") {
-    // 代码任务:reject = git reset --hard + clean,丢弃工作树里本任务的全部改动
-    const repoDir = t.payload.repoDir;
-    if (repoDir) {
-      try {
-        await gitReject(repoDir);
-      } catch (err) {
-        return { error: `git reset failed: ${err instanceof Error ? err.message : String(err)}` };
-      }
-    }
+    // 代码任务:reject = 丢弃 worktree(连同未提交改动 + 分支),不碰主线
+    await cleanupTaskWorktree(t);
   } else {
     // batch kinds: 把 .atlas-staging/<taskId>/ backup 回滚到原位置
     const files = t.changedFiles ?? [];
@@ -1151,8 +1180,8 @@ export async function deleteTask(taskId: string): Promise<{ ok: true } | { error
       const filePath = featureFilePath(t.payload.productId, t.payload.moduleName, t.payload.featureId);
       await fs.unlink(`${filePath}.draft`).catch(() => undefined);
     } else if (t.kind === "code-instruct") {
-      // 代码任务:回滚工作树
-      if (t.payload.repoDir) await gitReject(t.payload.repoDir).catch(() => undefined);
+      // 代码任务:丢弃 worktree
+      await cleanupTaskWorktree(t);
     } else {
       // batch kinds: 回滚 agent 写盘的变更 + 清 backup
       await restoreFromBackups(t.payload.productDir, t.id, t.changedFiles ?? []).catch(() => undefined);
@@ -1193,7 +1222,7 @@ export async function retryTask(
     // batch kinds: 回滚再重排同 kind 任务
     if (t.stage === "awaiting_review") {
       if (t.kind === "code-instruct") {
-        if (t.payload.repoDir) await gitReject(t.payload.repoDir).catch(() => undefined);
+        await cleanupTaskWorktree(t);
       } else {
         const files = t.changedFiles ?? [];
         await restoreFromBackups(t.payload.productDir, t.id, files).catch(() => undefined);

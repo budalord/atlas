@@ -945,8 +945,12 @@ export interface CodeInstructTask extends BaseTask {
   instruction: string;
   sessionId: string;
   plans?: TaskPlan[];
-  /** 本地码仓工作目录(repoResolver 解析自 meta.repo)。 */
+  /** 本地码仓主 clone(改造1)。 */
   repoDir?: string;
+  /** 改造3:本 Task 的 git worktree 隔离目录(cwd 指向这里;并行时各 Task 独立工作树)。 */
+  worktreePath?: string;
+  /** 改造3:worktree 分支名(approve 时合并回主线,reject/终态时删除)。 */
+  branch?: string;
 }
 
 /** Session 树里的 Task 层联合(规格层 + 应用代码层共享编排树)。 */

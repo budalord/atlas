@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { AgentSession, AgentSessionTree, NodeState, InstructTask } from "@atlas/shared";
 import { runCodex } from "./codexRunner";
-import { buildSessionPlanPrompt, type PlannedTask } from "./generatePromptBuilder";
+import { buildSessionPlanPrompt, buildCodeSessionPlanPrompt, type PlannedTask } from "./generatePromptBuilder";
 import { dataPath } from "./fileReader";
 import { bumpDataVersion } from "./watcher";
 import { enqueueBatch, getTask, onTaskChange, rehydrateInstructTask, resumeQueue } from "./taskQueue";
@@ -137,8 +137,8 @@ async function planAndEnqueue(s: AgentSession): Promise<void> {
 }
 
 /**
- * 应用代码层规划(phase1):先解析/clone 真码仓,再入队**单个** code-instruct Task。
- * 多 Task 拆分 + worktree 并行留到 phase3(改造 3)。码仓解析失败 → 硬失败(无可跑的 Task)。
+ * 应用代码层规划(改造 3):先解析/clone 真码仓,跑只读规划器把需求拆成 1..N 个**独立**代码 Task,
+ * 各入队 code-instruct(运行时各自开 worktree 并行)。码仓解析失败 → 硬失败(无可跑的 Task)。
  */
 async function planAndEnqueueCode(s: AgentSession): Promise<void> {
   let repoDir: string;
@@ -150,14 +150,29 @@ async function planAndEnqueueCode(s: AgentSession): Promise<void> {
     persist(s.id);
     return; // taskIds 空 + planError → deriveState 返回 failed
   }
-  const task = enqueueBatch({
-    productId: s.productId,
-    kind: "code-instruct",
-    instruction: s.instruction,
-    sessionId: s.id,
-    repoDir
-  });
-  s.taskIds.push(task.id);
+
+  let planned: PlannedTask[];
+  try {
+    const { prompt } = await buildCodeSessionPlanPrompt(s.productId, s.instruction, repoDir);
+    const result = await runCodex({ prompt, cwd: repoDir, timeoutMs: 5 * 60_000, sandbox: "read-only" });
+    planned = (result.ok && parsePlannedTasks(result.output)) || fallbackTasks(s.instruction);
+    if (!result.ok) s.planError = result.error || "code planner failed, fell back to single task";
+  } catch (err) {
+    s.planError = err instanceof Error ? err.message : String(err);
+    planned = fallbackTasks(s.instruction);
+  }
+
+  for (const p of planned) {
+    const instruction = p.targetHint ? `${p.scopedInstruction}\n\n(预计涉及:${p.targetHint})` : p.scopedInstruction;
+    const task = enqueueBatch({
+      productId: s.productId,
+      kind: "code-instruct",
+      instruction,
+      sessionId: s.id,
+      repoDir
+    });
+    s.taskIds.push(task.id);
+  }
   bumpDataVersion(`session:${s.id}:planned`);
   persist(s.id);
 }
