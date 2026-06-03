@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import type { ApiEnvelope, RefineTask, TaskStage } from "../types";
+import type { ApiEnvelope, Task, TaskStage } from "../types";
 import { useDataChange } from "../lib/useDataChange";
 import { useProductStore } from "../stores/productStore";
+
+/** 任务显示名:所有 kind 都有 title;feature-refine 额外有 featureName。 */
+function taskLabel(t: Task): string {
+  return t.title || ("featureName" in t ? t.featureName : "") || "(任务)";
+}
 
 /**
  * 右下角浮动队列指示器。
@@ -14,7 +19,7 @@ export function TaskQueueWidget({
 }: {
   onOpenFeature: (productId: string, featureId: string) => void;
 }) {
-  const [tasks, setTasks] = useState<RefineTask[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [open, setOpen] = useState(false);
   const selectProduct = useProductStore((s) => s.selectProduct);
 
@@ -22,11 +27,17 @@ export function TaskQueueWidget({
     try {
       const res = await fetch("/api/tasks");
       if (!res.ok) return;
-      const json = (await res.json()) as ApiEnvelope<RefineTask[]>;
+      const json = (await res.json()) as ApiEnvelope<Task[]>;
       setTasks(json.data);
     } catch {
       /* ignore */
     }
+  };
+
+  // 点任务:切到该产品;只有 feature-refine 才打开功能抽屉,其余 kind(含 code-instruct)只切产品。
+  const handleSelect = (t: Task) => {
+    selectProduct(t.productId);
+    if (t.kind === "feature-refine") onOpenFeature(t.productId, t.featureId);
   };
 
   useEffect(() => {
@@ -77,33 +88,9 @@ export function TaskQueueWidget({
             buckets.review.length === 0 ? (
               <div className="py-2 text-center text-slate-500">暂无活动任务</div>
             ) : null}
-            <Bucket
-              color="amber"
-              label="running"
-              onSelect={(t) => {
-                selectProduct(t.productId);
-                onOpenFeature(t.productId, t.featureId);
-              }}
-              tasks={buckets.running}
-            />
-            <Bucket
-              color="slate"
-              label="queued"
-              onSelect={(t) => {
-                selectProduct(t.productId);
-                onOpenFeature(t.productId, t.featureId);
-              }}
-              tasks={buckets.queued}
-            />
-            <Bucket
-              color="indigo"
-              label="awaiting_review"
-              onSelect={(t) => {
-                selectProduct(t.productId);
-                onOpenFeature(t.productId, t.featureId);
-              }}
-              tasks={buckets.review}
-            />
+            <Bucket color="amber" label="running" onSelect={handleSelect} tasks={buckets.running} />
+            <Bucket color="slate" label="queued" onSelect={handleSelect} tasks={buckets.queued} />
+            <Bucket color="indigo" label="awaiting_review" onSelect={handleSelect} tasks={buckets.review} />
             {buckets.recent.length > 0 ? (
               <>
                 <div className="mt-3 mb-1 text-[10px] font-semibold uppercase text-slate-500">
@@ -116,7 +103,7 @@ export function TaskQueueWidget({
                       key={t.id}
                     >
                       <div className="flex items-center justify-between">
-                        <span className="truncate text-slate-900">{t.featureName}</span>
+                        <span className="truncate text-slate-900">{taskLabel(t)}</span>
                         <StageDot stage={t.stage} />
                       </div>
                       <div className="text-[10px] text-slate-500">{t.productId}</div>
@@ -163,9 +150,9 @@ function Bucket({
   onSelect
 }: {
   label: string;
-  tasks: RefineTask[];
+  tasks: Task[];
   color: "amber" | "slate" | "indigo";
-  onSelect: (t: RefineTask) => void;
+  onSelect: (t: Task) => void;
 }) {
   if (tasks.length === 0) return null;
   const colorMap = {
@@ -185,7 +172,7 @@ function Bucket({
               type="button"
             >
               <div className="min-w-0 flex-1">
-                <div className="truncate font-medium">{t.featureName}</div>
+                <div className="truncate font-medium">{taskLabel(t)}</div>
                 <div className="text-[10px] opacity-75">{t.productId}</div>
               </div>
               <StageDot stage={t.stage} />
