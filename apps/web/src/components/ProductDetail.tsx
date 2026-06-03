@@ -6,8 +6,7 @@ import { useDataChange } from "../lib/useDataChange";
 import type { ApiEnvelope, ModuleWithFeatures, Product, ProductVision } from "../types";
 import { AdditionalDocsPanel } from "./AdditionalDocsPanel";
 import { AgentTasksPanel } from "./AgentTasksPanel";
-import { DevInstructBox } from "./DevInstructBox";
-import { SessionTreePanel } from "./SessionTreePanel";
+import { DevCockpit } from "./DevCockpit";
 import { ProductFlowOverview } from "./ProductFlowOverview";
 import { RecentActivityStrip } from "./RecentActivityStrip";
 import { CommitList } from "./CommitList";
@@ -129,13 +128,8 @@ export function ProductDetail({ product }: ProductDetailProps) {
         }
       />
       {phase !== "archived" ? <AgentTasksPanel productId={product.id} /> : null}
-      {/* 开发中阶段:需求框 → Session 编排树(产品级,只在 in-progress 出现) */}
-      {phase === "in-progress" ? (
-        <>
-          <DevInstructBox productId={product.id} />
-          <SessionTreePanel productId={product.id} />
-        </>
-      ) : null}
+      {/* 开发中阶段:决策者驾驶舱(搭骨架 / 建造看板 / 等你拍板 / 编排树,只在 in-progress 出现) */}
+      {phase === "in-progress" ? <DevCockpit productId={product.id} /> : null}
 
       {tab !== "flow" && tabs.some((t) => t.key === "flow") ? (
         <div className="flex items-center gap-3 border-b border-slate-200 bg-white px-6 py-2">

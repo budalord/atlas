@@ -53,7 +53,7 @@ async function isGitWorkTree(dir: string): Promise<boolean> {
  * 3. meta.repo(committed;仓库要 public 时这里通常留 null,避免把私有码仓地址入库)
  * 都没有 → null。
  */
-async function resolveRepoUrl(productId: string): Promise<string | null> {
+export async function resolveRepoUrl(productId: string): Promise<string | null> {
   const envKey = `ATLAS_REPO_${productId.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;
   const fromEnv = process.env[envKey]?.trim();
   if (fromEnv) return fromEnv;
@@ -68,6 +68,44 @@ async function resolveRepoUrl(productId: string): Promise<string | null> {
 
   const meta = await loadMeta(productId);
   return meta?.repo?.trim() || null;
+}
+
+/** 根目录里这些标记 = 已有应用工程脚手架(非纯规格镜像)。 */
+const SCAFFOLD_MARKERS = [
+  "package.json", "pnpm-workspace.yaml", "go.mod", "pom.xml", "build.gradle",
+  "Cargo.toml", "requirements.txt", "pyproject.toml", "Gemfile", "composer.json",
+  "src", "app", "apps", "cmd", "internal"
+];
+
+/** 该 repo 根目录是否已搭过应用工程骨架。 */
+async function hasAppCode(repoDir: string): Promise<boolean> {
+  try {
+    const entries = await fs.readdir(repoDir);
+    const set = new Set(entries);
+    return SCAFFOLD_MARKERS.some((m) => set.has(m));
+  } catch {
+    return false;
+  }
+}
+
+export interface DevRepoInfo {
+  /** meta.repo / 本地 repo 文件 / env 任一配了码仓地址 */
+  configured: boolean;
+  /** 本地 clone 路径(可能尚未 clone) */
+  repoDir: string;
+  /** 本地是否已 clone 出 git 工作树 */
+  cloned: boolean;
+  /** 是否已有应用工程骨架(非纯规格) */
+  scaffolded: boolean;
+}
+
+/** 体检码仓状态——**不触发 clone**(给 GET 状态用)。 */
+export async function inspectRepo(productId: string): Promise<DevRepoInfo> {
+  const url = await resolveRepoUrl(productId);
+  const repoDir = repoDirFor(productId);
+  const cloned = await isGitWorkTree(repoDir);
+  const scaffolded = cloned && (await hasAppCode(repoDir));
+  return { configured: !!url, repoDir, cloned, scaffolded };
 }
 
 /**

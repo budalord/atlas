@@ -1419,6 +1419,34 @@ export async function buildCodeSessionPlanPrompt(
   return { prompt };
 }
 
+/**
+ * 开发初始化「一键搭骨架」的指令(交给 code-instruct 单 Task 跑)。
+ * 读 tech_stack + 模块树,让编码 agent 在空仓里搭出**第一版可运行的工程骨架**。
+ * 返回纯指令串;buildCodeInstructPrompt 会再包上代码运行模式 + 规格上下文。
+ */
+export async function buildScaffoldInstruction(productId: string): Promise<string> {
+  const meta = await loadMeta(productId);
+  const modules = await loadModules(productId);
+  const stack = meta?.tech_stack?.length ? meta.tech_stack.join("、") : "(未明确,自行选一套主流稳妥的)";
+  const modList = modules.length > 0 ? modules.map((m) => `${m.name}(${m.title || m.name})`).join("、") : "(暂无模块,先搭通用骨架)";
+
+  return [
+    `【开发初始化 · 搭工程骨架】这是本仓第一次落地应用代码,当前仓里只有规格文档,没有可运行的工程。`,
+    `请搭出**第一版最小但能跑起来**的应用工程骨架(不是完整功能,是地基)。`,
+    "",
+    `技术栈意向:${stack}。若其中没有点明具体框架,请选一套**主流、稳妥、易上手**的(并在 README 说明你的选择与理由)。`,
+    `业务模块(按它们在源码里分目录/分模块组织,先建空骨架不实现具体功能):${modList}。`,
+    "",
+    `必须产出:`,
+    `1. 项目根的包/构建配置(如 package.json 等)+ 一条能跑通的「安装」和「启动/构建」命令,写进 README。`,
+    `2. 清晰的目录结构(按业务模块分),每个模块放一个占位入口 + 一句注释说明它将承载什么。`,
+    `3. 一个**能真正启动并访问/运行**的最小占位(如一个能起来的首页或入口),证明骨架是活的。`,
+    `4. README:技术栈选择与理由、如何安装、如何启动、目录结构说明、后续每个模块怎么往里填。`,
+    "",
+    `不要实现具体业务逻辑(那是后续逐模块建造的事);只要地基稳、能跑、结构清楚。最小依赖,别堆无关库。`
+  ].join("\n");
+}
+
 /** 规划器解析出的单个 Task。 */
 export interface PlannedTask {
   title: string;

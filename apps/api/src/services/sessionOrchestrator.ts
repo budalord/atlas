@@ -98,9 +98,9 @@ function fallbackTasks(instruction: string): PlannedTask[] {
 }
 
 /** 异步规划 + 入队各 Task。失败则兜底单 Task。 */
-async function planAndEnqueue(s: AgentSession): Promise<void> {
+async function planAndEnqueue(s: AgentSession, skipCodePlan = false): Promise<void> {
   if (s.target === "code") {
-    await planAndEnqueueCode(s);
+    await planAndEnqueueCode(s, skipCodePlan);
     return;
   }
   let planned: PlannedTask[];
@@ -140,7 +140,7 @@ async function planAndEnqueue(s: AgentSession): Promise<void> {
  * 应用代码层规划(改造 3):先解析/clone 真码仓,跑只读规划器把需求拆成 1..N 个**独立**代码 Task,
  * 各入队 code-instruct(运行时各自开 worktree 并行)。码仓解析失败 → 硬失败(无可跑的 Task)。
  */
-async function planAndEnqueueCode(s: AgentSession): Promise<void> {
+async function planAndEnqueueCode(s: AgentSession, skipPlan = false): Promise<void> {
   let repoDir: string;
   try {
     repoDir = await resolveRepoDir(s.productId);
@@ -152,14 +152,19 @@ async function planAndEnqueueCode(s: AgentSession): Promise<void> {
   }
 
   let planned: PlannedTask[];
-  try {
-    const { prompt } = await buildCodeSessionPlanPrompt(s.productId, s.instruction, repoDir);
-    const result = await runCodex({ prompt, cwd: repoDir, timeoutMs: 5 * 60_000, sandbox: "read-only" });
-    planned = (result.ok && parsePlannedTasks(result.output)) || fallbackTasks(s.instruction);
-    if (!result.ok) s.planError = result.error || "code planner failed, fell back to single task";
-  } catch (err) {
-    s.planError = err instanceof Error ? err.message : String(err);
+  if (skipPlan) {
+    // 搭骨架等不拆的任务:单 Task,跳过规划器
     planned = fallbackTasks(s.instruction);
+  } else {
+    try {
+      const { prompt } = await buildCodeSessionPlanPrompt(s.productId, s.instruction, repoDir);
+      const result = await runCodex({ prompt, cwd: repoDir, timeoutMs: 5 * 60_000, sandbox: "read-only" });
+      planned = (result.ok && parsePlannedTasks(result.output)) || fallbackTasks(s.instruction);
+      if (!result.ok) s.planError = result.error || "code planner failed, fell back to single task";
+    } catch (err) {
+      s.planError = err instanceof Error ? err.message : String(err);
+      planned = fallbackTasks(s.instruction);
+    }
   }
 
   for (const p of planned) {
@@ -184,7 +189,8 @@ async function planAndEnqueueCode(s: AgentSession): Promise<void> {
 export function createSession(
   productId: string,
   instruction: string,
-  target: "spec" | "code" = "spec"
+  target: "spec" | "code" = "spec",
+  opts?: { skipCodePlan?: boolean }
 ): AgentSessionTree {
   const s: AgentSession = {
     id: randomUUID(),
@@ -199,7 +205,7 @@ export function createSession(
   sessions.set(s.id, s);
   bumpDataVersion(`session:${s.id}:created`);
   persist(s.id); // 改造 5:建树即落盘(规划尚未拆出 Task)
-  void planAndEnqueue(s); // 不阻塞 HTTP 响应
+  void planAndEnqueue(s, opts?.skipCodePlan ?? false); // 不阻塞 HTTP 响应
   return getSessionTree(s.id)!;
 }
 
