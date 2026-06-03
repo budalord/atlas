@@ -64,14 +64,16 @@ tasksRouter.post("/", (req, res) => {
     res.status(400).json({ error: "productId required" });
     return;
   }
-  // 开发中阶段:product-instruct 不直接入队,先建 Session(规划器拆 Task 后再入队)
-  if (kind === "product-instruct") {
+  // 开发中阶段:product-instruct(规格)/ code-instruct(应用代码)不直接入队,
+  // 先建 Session(规划器拆 Task 后再入队)。target 决定改规格 md 还是改真码仓代码。
+  if (kind === "product-instruct" || kind === "code-instruct") {
     const instruction = typeof req.body?.instruction === "string" ? req.body.instruction.trim() : "";
     if (!instruction) {
-      res.status(400).json({ error: "instruction required for product-instruct" });
+      res.status(400).json({ error: `instruction required for ${kind}` });
       return;
     }
-    const tree = createSession(productId, instruction);
+    const target = kind === "code-instruct" ? "code" : "spec";
+    const tree = createSession(productId, instruction, target);
     res.status(201).json({ data: tree, version: getDataVersion() });
     return;
   }

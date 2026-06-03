@@ -17,6 +17,7 @@ import type {
   UseCaseGenerateTask,
   ConventionsGenerateTask,
   ProductInstructTask,
+  CodeInstructTask,
   TaskPlan,
   ChangedFile
 } from "@atlas/shared";
@@ -39,9 +40,11 @@ import {
   buildFeatureGeneratePrompt,
   buildUseCaseGeneratePrompt,
   buildConventionsGeneratePrompt,
-  buildProductInstructPrompt
+  buildProductInstructPrompt,
+  buildCodeInstructPrompt
 } from "./generatePromptBuilder";
 import { restoreFromBackups, clearBackups } from "./changesetTracker";
+import { gitDiffChangedFiles, gitEnsureClean, gitApprove, gitReject } from "./gitChangeset";
 import { flagRevisedScreensForReprototype } from "./prototypeQueue";
 import { dataPath } from "./fileReader";
 import { appendTaskHistory, buildHistoryRecord } from "./taskHistory";
@@ -70,10 +73,12 @@ interface FeatureRefinePayload {
 interface BatchPayload {
   productId: string;
   productDir: string;
-  /** product-instruct 用:决策者自由文本子指令 */
+  /** product-instruct / code-instruct 用:决策者自由文本子指令 */
   instruction?: string;
-  /** product-instruct 用:所属 Session id(独立入队时为空串) */
+  /** product-instruct / code-instruct 用:所属 Session id(独立入队时为空串) */
   sessionId?: string;
+  /** code-instruct 用:真码仓本地工作目录(cwd 指向这里,而非 productDir) */
+  repoDir?: string;
 }
 
 type InternalTask =
@@ -88,7 +93,8 @@ type InternalTask =
   | (FeatureGenerateTask & { payload: BatchPayload })
   | (UseCaseGenerateTask & { payload: BatchPayload })
   | (ConventionsGenerateTask & { payload: BatchPayload })
-  | (ProductInstructTask & { payload: BatchPayload });
+  | (ProductInstructTask & { payload: BatchPayload })
+  | (CodeInstructTask & { payload: BatchPayload });
 
 const tasks: InternalTask[] = [];
 let running = false;
@@ -133,6 +139,18 @@ function publicView(t: InternalTask): Task {
       // 让现有 AgentTasksPanel 仍能显示 running 步骤:把各 plan 的 steps 摊平回 task.steps
       steps: plans.flatMap((p) => p.steps)
     } as ProductInstructTask;
+  }
+  if (t.kind === "code-instruct") {
+    const plans = (t as CodeInstructTask).plans ?? [];
+    return {
+      ...baseView(t),
+      kind: "code-instruct",
+      instruction: t.payload.instruction ?? "",
+      sessionId: t.payload.sessionId ?? "",
+      repoDir: t.payload.repoDir,
+      plans,
+      steps: plans.flatMap((p) => p.steps)
+    } as CodeInstructTask;
   }
   return { ...baseView(t), kind: t.kind } as Task;
 }
@@ -209,7 +227,23 @@ export function enqueueRefine(args: EnqueueArgs): RefineTask {
 
 async function tick(): Promise<void> {
   if (running) return;
-  const next = tasks.find((t) => t.stage === "queued");
+  const next = tasks.find((t) => {
+    if (t.stage !== "queued") return false;
+    // code-instruct(phase1 无 worktree 隔离):同一码仓里若已有未结的 code 任务
+    // (running/awaiting_review,工作树带未提交改动),先不并起,等它被 approve/reject 落定。
+    if (t.kind === "code-instruct") {
+      const repoDir = t.payload.repoDir;
+      const busy = tasks.some(
+        (o) =>
+          o !== t &&
+          o.kind === "code-instruct" &&
+          o.payload.repoDir === repoDir &&
+          (o.stage === "running" || o.stage === "awaiting_review")
+      );
+      if (busy) return false;
+    }
+    return true;
+  });
   if (!next) return;
   running = true;
   try {
@@ -260,6 +294,9 @@ async function runOne(t: InternalTask): Promise<void> {
         return;
       case "product-instruct":
         await runProductInstruct(t);
+        return;
+      case "code-instruct":
+        await runCodeInstruct(t);
         return;
     }
   } catch (err) {
@@ -486,6 +523,108 @@ async function runProductInstruct(
   });
 }
 
+/**
+ * 开发中(应用代码层)「需求 → 改真码仓代码」执行(Session 树里的单个 Task)。
+ * 与 runProductInstruct 同构,差别:
+ * - cwd = 真码仓本地 clone(payload.repoDir),不是 data/products/<id>
+ * - 用 runCodex(workspace-write)直接跑(不走 runCodexMultiFile 的 .md snapshot)
+ * - 变更追踪走 gitChangeset(git diff),reject 时 git reset,approve 时 git commit
+ * 跑完仍落入现有三态闸(awaiting_review),审核走现有 ReviewChangesetModal。
+ */
+async function runCodeInstruct(
+  t: CodeInstructTask & { payload: BatchPayload }
+): Promise<void> {
+  const repoDir = t.payload.repoDir;
+  if (!repoDir) {
+    setStage(t, "failed", { finishedAt: new Date().toISOString(), error: "code-instruct 缺少 repoDir(码仓未解析)" });
+    return;
+  }
+  if (!t.plans || t.plans.length === 0) {
+    t.plans = [{ id: randomUUID(), kind: "execute", state: "pending", steps: [] }];
+  }
+  const plan = t.plans[0];
+  plan.state = "running";
+
+  // 串行保证下:此刻同仓无其它未结 code 任务(tick 守卫),把工作树重置到干净 HEAD,
+  // 清掉上一个 failed 任务可能残留的脏改动,确保 git diff 只反映本任务。
+  try {
+    await gitEnsureClean(repoDir);
+  } catch (err) {
+    plan.state = "failed";
+    setStage(t, "failed", {
+      finishedAt: new Date().toISOString(),
+      error: `git 清理工作树失败: ${err instanceof Error ? err.message : String(err)}`
+    });
+    return;
+  }
+
+  let prompt: string;
+  try {
+    const built = await buildCodeInstructPrompt(t.payload.productId, t.payload.instruction ?? "", repoDir);
+    prompt = built.prompt;
+  } catch (err) {
+    plan.state = "failed";
+    setStage(t, "failed", {
+      finishedAt: new Date().toISOString(),
+      error: `build prompt failed: ${err instanceof Error ? err.message : String(err)}`
+    });
+    return;
+  }
+
+  const result = await runCodex({
+    prompt,
+    cwd: repoDir,
+    timeoutMs: 30 * 60_000,
+    sandbox: "workspace-write",
+    taskId: t.id,
+    onStep: (label: string) => {
+      const ts = new Date().toISOString();
+      plan.steps.push({ ts, label });
+      if (plan.steps.length > 40) plan.steps.splice(0, plan.steps.length - 40);
+      bumpDataVersion(`task:${t.id}:step`);
+    }
+  });
+
+  if (!result.ok) {
+    plan.state = "failed";
+    setStage(t, "failed", {
+      finishedAt: new Date().toISOString(),
+      error: result.error || "codex run failed"
+    });
+    return;
+  }
+
+  let changedFiles: ChangedFile[];
+  try {
+    changedFiles = await gitDiffChangedFiles(repoDir);
+  } catch (err) {
+    plan.state = "failed";
+    setStage(t, "failed", {
+      finishedAt: new Date().toISOString(),
+      error: `git diff failed: ${err instanceof Error ? err.message : String(err)}`
+    });
+    return;
+  }
+
+  if (changedFiles.length === 0) {
+    plan.state = "finished";
+    setStage(t, "completed", {
+      finishedAt: new Date().toISOString(),
+      summaryLine: "本次无代码变更(agent 判断无需改动)"
+    });
+    return;
+  }
+
+  plan.changedFiles = changedFiles;
+  plan.state = "finished";
+  const summaryLine = `改动 ${changedFiles.length} 个文件(代码)`;
+  setStage(t, "awaiting_review", {
+    finishedAt: new Date().toISOString(),
+    changedFiles,
+    summaryLine
+  });
+}
+
 /** 把 changedFiles[] 聚合成一句话, e.g. "新增 8 screen (academic 4 / channel 2) · 更新 9 usecase". */
 function summarizeBatchTask(files: ChangedFile[]): string {
   if (files.length === 0) return "无变更";
@@ -628,6 +767,16 @@ export async function approveTask(taskId: string): Promise<Task | { error: strin
     } catch (err) {
       return { error: err instanceof Error ? err.message : String(err) };
     }
+  } else if (t.kind === "code-instruct") {
+    // 代码任务:approve = git commit 落地(改动已在工作树)
+    const repoDir = t.payload.repoDir;
+    if (repoDir) {
+      try {
+        await gitApprove(repoDir, `Atlas: ${t.title}`);
+      } catch (err) {
+        return { error: `git commit failed: ${err instanceof Error ? err.message : String(err)}` };
+      }
+    }
   } else {
     // batch kinds: 文件已被 agent workspace-write 落盘, approve = 清 backup
     await clearBackups(t.payload.productDir, t.id).catch(() => undefined);
@@ -640,6 +789,7 @@ export async function approveTask(taskId: string): Promise<Task | { error: strin
   }
 
   setStage(t, "completed", { finishedAt: new Date().toISOString() });
+  void tick(); // 被并发守卫挡住的同仓 code 任务可续跑
   return publicView(t);
 }
 
@@ -734,6 +884,16 @@ export async function rejectTask(taskId: string): Promise<Task | { error: string
   if (t.kind === "feature-refine") {
     const filePath = featureFilePath(t.payload.productId, t.payload.moduleName, t.payload.featureId);
     await fs.unlink(`${filePath}.draft`).catch(() => undefined);
+  } else if (t.kind === "code-instruct") {
+    // 代码任务:reject = git reset --hard + clean,丢弃工作树里本任务的全部改动
+    const repoDir = t.payload.repoDir;
+    if (repoDir) {
+      try {
+        await gitReject(repoDir);
+      } catch (err) {
+        return { error: `git reset failed: ${err instanceof Error ? err.message : String(err)}` };
+      }
+    }
   } else {
     // batch kinds: 把 .atlas-staging/<taskId>/ backup 回滚到原位置
     const files = t.changedFiles ?? [];
@@ -744,6 +904,7 @@ export async function rejectTask(taskId: string): Promise<Task | { error: string
     }
   }
   setStage(t, "rejected", { finishedAt: new Date().toISOString() });
+  void tick(); // 被并发守卫挡住的同仓 code 任务可续跑
   return publicView(t);
 }
 
@@ -767,6 +928,9 @@ export async function deleteTask(taskId: string): Promise<{ ok: true } | { error
     if (t.kind === "feature-refine") {
       const filePath = featureFilePath(t.payload.productId, t.payload.moduleName, t.payload.featureId);
       await fs.unlink(`${filePath}.draft`).catch(() => undefined);
+    } else if (t.kind === "code-instruct") {
+      // 代码任务:回滚工作树
+      if (t.payload.repoDir) await gitReject(t.payload.repoDir).catch(() => undefined);
     } else {
       // batch kinds: 回滚 agent 写盘的变更 + 清 backup
       await restoreFromBackups(t.payload.productDir, t.id, t.changedFiles ?? []).catch(() => undefined);
@@ -776,6 +940,7 @@ export async function deleteTask(taskId: string): Promise<{ ok: true } | { error
 
   tasks.splice(idx, 1);
   bumpDataVersion(`task:delete:${taskId}`);
+  void tick(); // 同仓被守卫挡住的 code 任务可续跑
   return { ok: true };
 }
 
@@ -802,21 +967,24 @@ export async function retryTask(
       extraInstruction: [t.payload.extraInstruction, extra].filter(Boolean).join("\n")
     });
   } else {
-    // batch kinds: 回滚 backup 再重排同 kind 任务
+    // batch kinds: 回滚再重排同 kind 任务
     if (t.stage === "awaiting_review") {
-      const files = t.changedFiles ?? [];
-      await restoreFromBackups(t.payload.productDir, t.id, files).catch(() => undefined);
+      if (t.kind === "code-instruct") {
+        if (t.payload.repoDir) await gitReject(t.payload.repoDir).catch(() => undefined);
+      } else {
+        const files = t.changedFiles ?? [];
+        await restoreFromBackups(t.payload.productDir, t.id, files).catch(() => undefined);
+      }
     }
-    // product-instruct:带回原指令 + sessionId,extra 作为重做补充指令追加
-    const instruction =
-      t.kind === "product-instruct"
-        ? [t.payload.instruction, extra].filter(Boolean).join("\n")
-        : undefined;
+    // product-instruct / code-instruct:带回原指令 + sessionId(+ code 的 repoDir),extra 追加
+    const isInstruct = t.kind === "product-instruct" || t.kind === "code-instruct";
+    const instruction = isInstruct ? [t.payload.instruction, extra].filter(Boolean).join("\n") : undefined;
     next = enqueueBatch({
       productId: t.payload.productId,
       kind: t.kind,
       instruction,
-      sessionId: t.kind === "product-instruct" ? t.payload.sessionId : undefined
+      sessionId: isInstruct ? t.payload.sessionId : undefined,
+      repoDir: t.kind === "code-instruct" ? t.payload.repoDir : undefined
     });
   }
 
@@ -830,10 +998,12 @@ export async function retryTask(
 export interface EnqueueBatchArgs {
   productId: string;
   kind: Exclude<TaskKind, "feature-refine">;
-  /** product-instruct 用:决策者自由文本子指令 */
+  /** product-instruct / code-instruct 用:决策者自由文本子指令 */
   instruction?: string;
-  /** product-instruct 用:所属 Session id */
+  /** product-instruct / code-instruct 用:所属 Session id */
   sessionId?: string;
+  /** code-instruct 用:真码仓本地工作目录 */
+  repoDir?: string;
 }
 
 /** product-instruct 的 Task 标题取指令前若干字。 */
@@ -846,7 +1016,8 @@ function instructionTitle(instruction: string | undefined): string {
 export function enqueueBatch(args: EnqueueBatchArgs): Task {
   const id = randomUUID();
   const productDir = dataPath("products", args.productId);
-  const isInstruct = args.kind === "product-instruct";
+  const isInstruct = args.kind === "product-instruct" || args.kind === "code-instruct";
+  const isCode = args.kind === "code-instruct";
   const title = isInstruct ? instructionTitle(args.instruction) : batchTaskTitle(args.kind);
   const base = {
     id,
@@ -861,9 +1032,10 @@ export function enqueueBatch(args: EnqueueBatchArgs): Task {
     payload: {
       productId: args.productId,
       productDir,
-      ...(isInstruct ? { instruction: args.instruction ?? "", sessionId: args.sessionId ?? "" } : {})
+      ...(isInstruct ? { instruction: args.instruction ?? "", sessionId: args.sessionId ?? "" } : {}),
+      ...(isCode ? { repoDir: args.repoDir } : {})
     },
-    // product-instruct:初始化 execute Plan(Session 树的 Plan 层)
+    // product-instruct / code-instruct:初始化 execute Plan(Session 树的 Plan 层)
     ...(isInstruct
       ? { plans: [{ id: randomUUID(), kind: "execute", state: "pending", steps: [] }] as TaskPlan[] }
       : {})
@@ -889,6 +1061,7 @@ function batchTaskTitle(kind: Exclude<TaskKind, "feature-refine">): string {
     case "usecase-generate": return "Generate use cases (batch)";
     case "conventions-generate": return "Generate conventions (batch)";
     case "product-instruct": return "按需求改规格";
+    case "code-instruct": return "按需求改代码";
   }
 }
 

@@ -817,7 +817,9 @@ export type TaskKind =
   | "usecase-generate"
   | "conventions-generate"
   // 开发中阶段:决策者自由文本需求 → agent 直接改规格(Session 编排树里的单个 Task 原子)
-  | "product-instruct";
+  | "product-instruct"
+  // 开发中阶段(应用代码层):决策者自由文本需求 → agent 直接改真码仓代码,git diff 进三态闸
+  | "code-instruct";
 
 /** batch kinds 跑完后, 由 changesetTracker 反推的单条文件变更。 */
 export interface ChangedFile {
@@ -932,6 +934,24 @@ export interface ProductInstructTask extends BaseTask {
   plans?: TaskPlan[];
 }
 
+/**
+ * 开发中(应用代码层)的单个 Task 原子,与 ProductInstructTask 同构,但:
+ * - 目标是真码仓代码(非规格 md),cwd = 本地 clone 工作目录(repoDir)
+ * - 变更追踪走 git diff / git reset(gitChangeset),而非 .md snapshot + .atlas-staging
+ * 仍走现有三态闸(awaiting_review),审核复用现有 ReviewChangesetModal。
+ */
+export interface CodeInstructTask extends BaseTask {
+  kind: "code-instruct";
+  instruction: string;
+  sessionId: string;
+  plans?: TaskPlan[];
+  /** 本地码仓工作目录(repoResolver 解析自 meta.repo)。 */
+  repoDir?: string;
+}
+
+/** Session 树里的 Task 层联合(规格层 + 应用代码层共享编排树)。 */
+export type InstructTask = ProductInstructTask | CodeInstructTask;
+
 export type Task =
   | FeatureRefineTask
   | FeatureReviseTask
@@ -944,7 +964,8 @@ export type Task =
   | FeatureGenerateTask
   | UseCaseGenerateTask
   | ConventionsGenerateTask
-  | ProductInstructTask;
+  | ProductInstructTask
+  | CodeInstructTask;
 
 /** 兼容别名: 旧代码用 RefineTask = FeatureRefineTask */
 export type RefineTask = FeatureRefineTask;
@@ -982,12 +1003,14 @@ export interface AgentSession {
   taskIds: string[];
   /** 规划器失败信息(失败则兜底为单 Task) */
   planError?: string | null;
+  /** 目标层:规格 md(默认)或应用代码仓。决定子 Task 的 kind 与变更追踪方式。 */
+  target?: "spec" | "code";
 }
 
 /** Session 树视图:Session + 其子 Task 的公开视图(给前端 SessionTreePanel)。 */
 export interface AgentSessionTree {
   session: AgentSession;
-  tasks: ProductInstructTask[];
+  tasks: InstructTask[];
 }
 
 /**

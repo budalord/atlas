@@ -3,8 +3,8 @@ import { useDataChange } from "../lib/useDataChange";
 import type {
   AgentSessionTree,
   ApiEnvelope,
+  InstructTask,
   NodeState,
-  ProductInstructTask,
   TaskPlan,
   TaskStage
 } from "../types";
@@ -20,7 +20,7 @@ interface SessionTreePanelProps {
  */
 export function SessionTreePanel({ productId }: SessionTreePanelProps) {
   const [trees, setTrees] = useState<AgentSessionTree[]>([]);
-  const [reviewTask, setReviewTask] = useState<ProductInstructTask | null>(null);
+  const [reviewTask, setReviewTask] = useState<InstructTask | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -69,7 +69,7 @@ function SessionCard({
   onReview
 }: {
   tree: AgentSessionTree;
-  onReview: (t: ProductInstructTask) => void;
+  onReview: (t: InstructTask) => void;
 }) {
   const { session, tasks } = tree;
   const planning = session.taskIds.length === 0 && session.state === "running";
@@ -115,9 +115,9 @@ function TaskNode({
   index,
   onReview
 }: {
-  task: ProductInstructTask;
+  task: InstructTask;
   index: number;
-  onReview: (t: ProductInstructTask) => void;
+  onReview: (t: InstructTask) => void;
 }) {
   const plans = task.plans ?? [];
   return (

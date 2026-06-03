@@ -43,6 +43,8 @@ export type {
   ScreenReviseTask,
   // 开发中阶段 Session 编排树
   ProductInstructTask,
+  CodeInstructTask,
+  InstructTask,
   NodeState,
   TaskPlan,
   AgentSession,

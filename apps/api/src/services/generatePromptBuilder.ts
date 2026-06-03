@@ -1225,6 +1225,57 @@ export async function buildProductInstructPrompt(
   return { prompt };
 }
 
+/**
+ * 开发中(应用代码层)「执行」prompt:决策者一句话需求 → agent 直接改真码仓代码。
+ * 与 buildProductInstructPrompt 的区别:
+ * - cwd 是真码仓本地 clone(不是 data/products/<id>),agent 改的是应用源码
+ * - 规格(模块/功能点/实体)只作**上下文**喂入,帮 agent 对齐业务,不是要改的对象
+ * - 由 runCodeInstruct 用 runCodex(workspace-write)直接跑,git diff 反推 changedFiles
+ */
+export async function buildCodeInstructPrompt(
+  productId: string,
+  instruction: string,
+  repoDir: string
+): Promise<{ prompt: string }> {
+  const meta = await loadMeta(productId);
+  const index = await moduleFeatureIndex(productId);
+  const today = new Date().toISOString().slice(0, 10);
+
+  const prompt = [
+    `# Atlas 开发中·应用代码层 编码任务`,
+    "",
+    "## 上下文",
+    `- 产品: ${meta ? `${meta.name} (${productId})` : productId}`,
+    `- 码仓工作目录(cwd): ${repoDir}`,
+    `- 当前时间: ${today}`,
+    "",
+    `## 运行模式(优先级最高)
+你在 \`codex exec -s workspace-write\` 非交互沙箱内,cwd 即真码仓,**没有 human-in-the-loop**。
+- **直接动手**:用 Edit/Write 把代码改动落盘到 cwd 内。不要请求确认、不要只输出 diff plan。
+- 不要在最终消息里贴文件内容 —— Atlas 用 \`git diff\` 反推你的改动作为 changeset 进人审。
+- 只改与本需求直接相关的文件(最小变更),不顺手重构无关代码。
+- 跑完后 Atlas 会在 UI 让决策者按文件 review;通过则 \`git commit\` 落地,拒绝则 \`git reset --hard\` 回滚。`,
+    "",
+    "## 决策者需求(本次任务 · 优先级最高)",
+    "",
+    instruction.trim() || "(空 — 无需求,直接结束不改动)",
+    "",
+    "## 当前产品",
+    describeProduct(meta, productId),
+    "",
+    "## 规格全景(模块 → 功能点 · 仅作业务上下文,不是要改的文件)",
+    index,
+    "",
+    `## 注意事项
+- 目标是**应用代码**(非规格 md)。规格只是帮你理解业务的上下文。
+- 不要触碰 cwd(${repoDir})之外的文件。
+- 若码仓尚无相关脚手架/源码,可按需求**新建**最小可用的源文件(语言/框架按需求或已有约定)。
+- 信息不足处,代码里留 TODO 注释说明,不要凭空编造业务规则。`
+  ].join("\n");
+
+  return { prompt };
+}
+
 /** 规划器解析出的单个 Task。 */
 export interface PlannedTask {
   title: string;

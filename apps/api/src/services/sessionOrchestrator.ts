@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import type { AgentSession, AgentSessionTree, NodeState, ProductInstructTask } from "@atlas/shared";
+import type { AgentSession, AgentSessionTree, NodeState, InstructTask } from "@atlas/shared";
 import { runCodex } from "./codexRunner";
 import { buildSessionPlanPrompt, type PlannedTask } from "./generatePromptBuilder";
 import { dataPath } from "./fileReader";
 import { bumpDataVersion } from "./watcher";
 import { enqueueBatch, getTask } from "./taskQueue";
+import { resolveRepoDir } from "./repoResolver";
 
 /**
  * 开发中阶段「需求框 → agent 改规格」的 Session 编排层(树的根)。
@@ -39,7 +40,7 @@ export function getSessionTree(id: string): AgentSessionTree | null {
   if (!s) return null;
   const tasks = s.taskIds
     .map((tid) => getTask(tid))
-    .filter((t): t is ProductInstructTask => !!t && t.kind === "product-instruct");
+    .filter((t): t is InstructTask => !!t && (t.kind === "product-instruct" || t.kind === "code-instruct"));
   return { session: viewSession(s), tasks };
 }
 
@@ -82,6 +83,10 @@ function fallbackTasks(instruction: string): PlannedTask[] {
 
 /** 异步规划 + 入队各 Task。失败则兜底单 Task。 */
 async function planAndEnqueue(s: AgentSession): Promise<void> {
+  if (s.target === "code") {
+    await planAndEnqueueCode(s);
+    return;
+  }
   let planned: PlannedTask[];
   try {
     const { prompt } = await buildSessionPlanPrompt(s.productId, s.instruction);
@@ -115,10 +120,38 @@ async function planAndEnqueue(s: AgentSession): Promise<void> {
 }
 
 /**
+ * 应用代码层规划(phase1):先解析/clone 真码仓,再入队**单个** code-instruct Task。
+ * 多 Task 拆分 + worktree 并行留到 phase3(改造 3)。码仓解析失败 → 硬失败(无可跑的 Task)。
+ */
+async function planAndEnqueueCode(s: AgentSession): Promise<void> {
+  let repoDir: string;
+  try {
+    repoDir = await resolveRepoDir(s.productId);
+  } catch (err) {
+    s.planError = err instanceof Error ? err.message : String(err);
+    bumpDataVersion(`session:${s.id}:planned`);
+    return; // taskIds 空 + planError → deriveState 返回 failed
+  }
+  const task = enqueueBatch({
+    productId: s.productId,
+    kind: "code-instruct",
+    instruction: s.instruction,
+    sessionId: s.id,
+    repoDir
+  });
+  s.taskIds.push(task.id);
+  bumpDataVersion(`session:${s.id}:planned`);
+}
+
+/**
  * 创建 Session:立即返回(taskIds 空 = 规划中),规划在后台异步进行。
  * 前端轮询 GET /api/sessions/:id 看树长出 Task。
  */
-export function createSession(productId: string, instruction: string): AgentSessionTree {
+export function createSession(
+  productId: string,
+  instruction: string,
+  target: "spec" | "code" = "spec"
+): AgentSessionTree {
   const s: AgentSession = {
     id: randomUUID(),
     productId,
@@ -126,7 +159,8 @@ export function createSession(productId: string, instruction: string): AgentSess
     state: "running",
     createdAt: new Date().toISOString(),
     taskIds: [],
-    planError: null
+    planError: null,
+    target
   };
   sessions.set(s.id, s);
   bumpDataVersion(`session:${s.id}:created`);
