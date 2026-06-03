@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ApiEnvelope, Task, TaskStage } from "../types";
 import { useDataChange } from "../lib/useDataChange";
 import { useProductStore } from "../stores/productStore";
+import { ReviewChangesetModal } from "./ReviewChangesetModal";
 
 /** 任务显示名:所有 kind 都有 title;feature-refine 额外有 featureName。 */
 function taskLabel(t: Task): string {
@@ -21,6 +22,7 @@ export function TaskQueueWidget({
 }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [open, setOpen] = useState(false);
+  const [reviewTask, setReviewTask] = useState<Task | null>(null);
   const selectProduct = useProductStore((s) => s.selectProduct);
 
   const load = async () => {
@@ -34,10 +36,17 @@ export function TaskQueueWidget({
     }
   };
 
-  // 点任务:切到该产品;只有 feature-refine 才打开功能抽屉,其余 kind(含 code-instruct)只切产品。
+  // 点任务:
+  // - feature-refine → 打开功能抽屉(它的审核走 .draft 抽屉,不是 changeset 弹窗)。
+  // - 其它 kind 且待审 → 直接开审核弹窗(changeset 三态闸),含 code-instruct(搭骨架/建造功能点)。
+  // - 其余(running/queued)→ 只切到该产品。
   const handleSelect = (t: Task) => {
     selectProduct(t.productId);
-    if (t.kind === "feature-refine") onOpenFeature(t.productId, t.featureId);
+    if (t.kind === "feature-refine") {
+      onOpenFeature(t.productId, t.featureId);
+    } else if (t.stage === "awaiting_review") {
+      setReviewTask(t);
+    }
   };
 
   useEffect(() => {
@@ -46,6 +55,13 @@ export function TaskQueueWidget({
   useDataChange(() => {
     void load();
   });
+
+  // 审核弹窗里的 task 随队列刷新同步;approve/reject 后该 task 离开待审 → 关弹窗。
+  useEffect(() => {
+    if (!reviewTask) return;
+    const fresh = tasks.find((t) => t.id === reviewTask.id);
+    if (!fresh || fresh.stage !== "awaiting_review") setReviewTask(null);
+  }, [tasks, reviewTask]);
 
   const buckets = useMemo(() => {
     const running = tasks.filter((t) => t.stage === "running");
@@ -59,9 +75,11 @@ export function TaskQueueWidget({
   }, [tasks]);
 
   const activeCount = buckets.running.length + buckets.queued.length + buckets.review.length;
-  if (activeCount === 0 && buckets.recent.length === 0) return null;
+  if (activeCount === 0 && buckets.recent.length === 0 && !reviewTask) return null;
 
   return (
+    <>
+    {reviewTask ? <ReviewChangesetModal onClose={() => setReviewTask(null)} task={reviewTask} /> : null}
     <div className="fixed bottom-4 right-4 z-30">
       {open ? (
         <div className="w-[320px] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl">
@@ -140,6 +158,7 @@ export function TaskQueueWidget({
         </button>
       )}
     </div>
+    </>
   );
 }
 
