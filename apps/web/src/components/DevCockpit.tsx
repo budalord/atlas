@@ -183,14 +183,17 @@ export function DevCockpit({ productId }: { productId: string }) {
         </div>
       ) : null}
 
-      {/* ③ 建造看板:模块 → 功能点 */}
+      {/* ③ 建造看板:模块 → 功能点(未搭骨架也展示蓝图,开建按钮锁住) */}
       <div className="mb-1 text-[11px] font-medium text-slate-500">建造看板 · 模块 → 功能点(建造/审核单元)</div>
-      {!repo.scaffolded ? (
-        <div className="rounded-md border border-dashed border-slate-300 px-3 py-3 text-[12px] text-slate-400">先搭骨架,再逐功能点建造。</div>
-      ) : mods.length === 0 ? (
+      {mods.length === 0 ? (
         <div className="rounded-md border border-dashed border-slate-300 px-3 py-3 text-[12px] text-slate-400">该产品暂无模块/功能点。</div>
       ) : (
         <div className="space-y-2">
+          {!repo.scaffolded ? (
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+              下面是你 ERP 的蓝图:<b>{mods.length} 个模块 · {mods.reduce((n, m) => n + m.features.length, 0)} 个功能点 · {screens.length} 张原型页</b>(规格一个没少)。先「一键搭骨架」,再逐个开建。
+            </div>
+          ) : null}
           {mods.map((mod) => {
             const feats = mod.features;
             const open = expanded[mod.module.name] ?? false;
@@ -270,13 +273,22 @@ export function DevCockpit({ productId }: { productId: string }) {
                                 >
                                   ↻ 再建/改
                                 </button>
-                              ) : (
+                              ) : repo.scaffolded ? (
                                 <button
                                   className="w-full rounded bg-slate-900 px-2 py-1 text-[11px] font-medium text-white hover:bg-slate-700"
                                   onClick={() => void buildFeature(mod, f)}
                                   type="button"
                                 >
                                   ▶ 开建
+                                </button>
+                              ) : (
+                                <button
+                                  className="w-full cursor-not-allowed rounded bg-slate-200 px-2 py-1 text-[11px] font-medium text-slate-400"
+                                  disabled
+                                  title="先「一键搭骨架」后才能开建"
+                                  type="button"
+                                >
+                                  🔒 先搭骨架
                                 </button>
                               )}
                             </div>
