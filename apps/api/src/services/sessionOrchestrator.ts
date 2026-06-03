@@ -6,7 +6,7 @@ import { dataPath } from "./fileReader";
 import { bumpDataVersion } from "./watcher";
 import { enqueueBatch, getTask, onTaskChange, rehydrateInstructTask, resumeQueue } from "./taskQueue";
 import { resolveRepoDir } from "./repoResolver";
-import { persistTree, loadAllTrees } from "./orchestrationStore";
+import { persistTree, loadAllTrees, deletePersistedTree } from "./orchestrationStore";
 
 /**
  * 开发中阶段「需求框 → agent 改规格」的 Session 编排层(树的根)。
@@ -24,7 +24,11 @@ const sessions = new Map<string, AgentSession>();
 /** 改造 5:把某 Session 的当前树落盘(best-effort)。 */
 function persist(sessionId: string): void {
   const tree = getSessionTree(sessionId);
-  if (tree) void persistTree(tree);
+  if (!tree) return;
+  // 防自毁:有 taskIds 但 tasks 解析不出(内存态不一致,例如另一实例已重置)→ 不落盘,
+  // 否则会把"含已完成 Task"的好文件覆盖成空,重启后变成永远 running 的幽灵树。
+  if (tree.session.taskIds.length > 0 && tree.tasks.length === 0) return;
+  void persistTree(tree);
 }
 
 /**
@@ -226,6 +230,12 @@ export async function loadPersistedOrchestration(): Promise<void> {
   for (const tree of trees) {
     const s = tree.session;
     if (!s?.id || sessions.has(s.id)) continue;
+    // 幽灵树清理:有 taskIds 但落盘 tasks 为空(历史损坏文件)→ 不恢复 + 删文件,
+    // 否则 deriveState 会把它显示成永远"建造中/running"。
+    if ((s.taskIds?.length ?? 0) > 0 && (tree.tasks?.length ?? 0) === 0) {
+      void deletePersistedTree(s.productId, s.id);
+      continue;
+    }
     sessions.set(s.id, { ...s, planError: s.planError ?? null });
     sessionCount += 1;
     for (const task of tree.tasks ?? []) {
