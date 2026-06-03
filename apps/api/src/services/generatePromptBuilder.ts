@@ -1226,10 +1226,51 @@ export async function buildProductInstructPrompt(
 }
 
 /**
+ * 从指令里的 [feat:模块/功能点id] 标签,读出**该功能点的完整规格**(权威源,从 data 目录读)
+ * + 它 touch 的实体 schema,拼成一段喂给建造 agent。无标签(自由代码任务)返回 null。
+ * 这是"代码真对得上功能点/实体"的关键——不靠 agent 自己去翻,而是把权威规格直接摆上桌。
+ */
+async function loadFeatureSpecBlock(productId: string, instruction: string): Promise<string | null> {
+  const m = instruction.match(/\[feat:([\w.-]+)\/([\w.-]+)\]/);
+  if (!m) return null;
+  const [, moduleName, featureId] = m;
+  const featMd = await readTextFile("products", productId, "modules", moduleName, "features", `${featureId}.md`);
+  if (!featMd) return null;
+
+  // 抽 frontmatter 的 entities_touched 列表
+  const touched: string[] = [];
+  const ftMatch = featMd.match(/entities_touched:\s*\n((?:\s*-\s*.+\n?)+)/);
+  if (ftMatch) {
+    for (const line of ftMatch[1].split("\n")) {
+      const e = line.match(/-\s*(.+)/);
+      if (e && e[1].trim()) touched.push(e[1].trim());
+    }
+  }
+  const entityBlocks: string[] = [];
+  for (const ent of touched.slice(0, 6)) {
+    const md =
+      (await readTextFile("products", productId, "entities", `${ent}.md`)) ||
+      (await readTextFile("products", productId, "modules", moduleName, "entities", `${ent}.md`));
+    if (md) entityBlocks.push(`### 实体 ${ent}\n\`\`\`md\n${md.trim().slice(0, 2500)}\n\`\`\``);
+  }
+
+  return [
+    "## 本功能点完整规格(权威源 · 务必照此实现,不要凭空发挥)",
+    "```md",
+    featMd.trim(),
+    "```",
+    entityBlocks.length > 0 ? "\n## 涉及实体的 schema(字段/类型以此为准)\n\n" + entityBlocks.join("\n\n") : "",
+    `\n> 相关用例见仓内 modules/${moduleName}/usecases/;对应界面屏的信息架构见 modules/${moduleName}/screens/(需要细节时读它们)。`
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/**
  * 开发中(应用代码层)「执行」prompt:决策者一句话需求 → agent 直接改真码仓代码。
  * 与 buildProductInstructPrompt 的区别:
  * - cwd 是真码仓本地 clone(不是 data/products/<id>),agent 改的是应用源码
- * - 规格(模块/功能点/实体)只作**上下文**喂入,帮 agent 对齐业务,不是要改的对象
+ * - 把**本功能点的完整规格 + 实体 schema**(权威源)直接喂入,并要求遵守 产品规范/开发规范
  * - 由 runCodeInstruct 用 runCodex(workspace-write)直接跑,git diff 反推 changedFiles
  */
 export async function buildCodeInstructPrompt(
@@ -1240,6 +1281,7 @@ export async function buildCodeInstructPrompt(
   const meta = await loadMeta(productId);
   const index = await moduleFeatureIndex(productId);
   const today = new Date().toISOString().slice(0, 10);
+  const featSpec = await loadFeatureSpecBlock(productId, instruction);
 
   const prompt = [
     `# Atlas 开发中·应用代码层 编码任务`,
@@ -1260,10 +1302,18 @@ export async function buildCodeInstructPrompt(
     "",
     instruction.trim() || "(空 — 无需求,直接结束不改动)",
     "",
-    "## 当前产品",
-    describeProduct(meta, productId),
+    // 关键:把本功能点的**完整规格 + 实体 schema**(权威源)摆上桌,代码必须对得上它
+    featSpec ?? "",
     "",
-    "## 规格全景(模块 → 功能点 · 仅作业务上下文,不是要改的文件)",
+    `## 产品规范(业务规则 · 必读且不得违背)
+读仓内 \`CONVENTIONS.md\` 与 \`DECISIONS.md\`(本仓镜像了规格),遵守其中的业务约定、命名、既定决策;
+你的实现不得与之冲突。涉及金额/状态机/权限/对接(飞书·凡科)等业务规则,以规范与上面的功能点规格为准,不要自创。`,
+    "",
+    `## 开发规范(工程约定 · 必读且严格遵循)
+读仓内 \`DEV-CONVENTIONS.md\`(技术栈 / 数据层 / 目录结构 / 命名 / 错误处理 / 并行规则)并严格遵循;
+若该文件暂不存在,**沿用仓内既有代码的栈、目录与风格**,不要另起一套。`,
+    "",
+    "## 规格全景(模块 → 功能点 · 仅作定位参考)",
     index,
     "",
     `## 注意事项
