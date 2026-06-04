@@ -9,6 +9,11 @@ function taskLabel(t: Task): string {
   return t.title || ("featureName" in t ? t.featureName : "") || "(任务)";
 }
 
+/** running 任务最新一步(code/product-instruct 的 plan steps 已被 publicView 摊平回 t.steps)。 */
+function latestStep(t: Task): string | null {
+  return t.steps && t.steps.length > 0 ? t.steps[t.steps.length - 1].label : null;
+}
+
 /**
  * 右下角浮动队列指示器。
  * 折叠态:小圆角 chip,显示活动任务计数 + 状态色;
@@ -106,7 +111,7 @@ export function TaskQueueWidget({
             buckets.review.length === 0 ? (
               <div className="py-2 text-center text-slate-500">暂无活动任务</div>
             ) : null}
-            <Bucket color="amber" label="running" onSelect={handleSelect} tasks={buckets.running} />
+            <Bucket color="amber" label="running" onSelect={handleSelect} showSteps tasks={buckets.running} />
             <Bucket color="slate" label="queued" onSelect={handleSelect} tasks={buckets.queued} />
             <Bucket color="indigo" label="awaiting_review" onSelect={handleSelect} tasks={buckets.review} />
             {buckets.recent.length > 0 ? (
@@ -166,12 +171,15 @@ function Bucket({
   label,
   tasks,
   color,
-  onSelect
+  onSelect,
+  showSteps = false
 }: {
   label: string;
   tasks: Task[];
   color: "amber" | "slate" | "indigo";
   onSelect: (t: Task) => void;
+  /** running 桶:在标题下加一行 agent 当前最新步骤 + 步数。 */
+  showSteps?: boolean;
 }) {
   if (tasks.length === 0) return null;
   const colorMap = {
@@ -183,21 +191,30 @@ function Bucket({
     <div className="mb-2">
       <div className="mb-1 text-[10px] font-semibold uppercase text-slate-500">{label}</div>
       <ul className="space-y-1">
-        {tasks.map((t) => (
-          <li key={t.id}>
-            <button
-              className={`flex w-full items-center justify-between rounded border px-2 py-1.5 text-left transition hover:opacity-80 ${colorMap[color]}`}
-              onClick={() => onSelect(t)}
-              type="button"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="truncate font-medium">{taskLabel(t)}</div>
-                <div className="text-[10px] opacity-75">{t.productId}</div>
-              </div>
-              <StageDot stage={t.stage} />
-            </button>
-          </li>
-        ))}
+        {tasks.map((t) => {
+          const step = showSteps ? latestStep(t) : null;
+          return (
+            <li key={t.id}>
+              <button
+                className={`flex w-full items-center justify-between rounded border px-2 py-1.5 text-left transition hover:opacity-80 ${colorMap[color]}`}
+                onClick={() => onSelect(t)}
+                type="button"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-medium">{taskLabel(t)}</div>
+                  <div className="text-[10px] opacity-75">{t.productId}</div>
+                  {step ? (
+                    <div className="mt-0.5 truncate font-mono text-[10px] text-slate-500">
+                      ⏳ {step}
+                      {t.steps && t.steps.length > 0 ? <span className="opacity-60"> · {t.steps.length} 步</span> : null}
+                    </div>
+                  ) : null}
+                </div>
+                <StageDot stage={t.stage} />
+              </button>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

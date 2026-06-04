@@ -20,6 +20,8 @@ interface RepoStatus {
   repoDir: string;
   cloned: boolean;
   scaffolded: boolean;
+  /** 阶段②:实体已落成 migrations + RLS,逐功能点建造的地基(供开建闸门 + 阶段②卡片)。 */
+  dataModeled: boolean;
 }
 
 type FeatState = "none" | "building" | "review" | "done";
@@ -89,12 +91,25 @@ export function DevCockpit({ productId }: { productId: string }) {
     const tasks = matched.flatMap((t) => t.tasks);
     const review = tasks.find((x) => x.stage === "awaiting_review");
     if (review) return { state: "review", task: review as Task };
-    const active = tasks.some((x) => x.stage === "queued" || x.stage === "running");
+    const active = tasks.find((x) => x.stage === "queued" || x.stage === "running");
     // 刚开建、规划器还没拆出 Task 的窗口期也算"建造中",避免卡片看着像没动
     const planning = matched.some((t) => t.tasks.length === 0 && t.session.state !== "failed");
-    if (active || planning) return { state: "building" };
+    if (active || planning) return { state: "building", task: active as Task | undefined };
     if (tasks.some((x) => x.stage === "completed")) return { state: "done" };
     return { state: "none" }; // 全 rejected/failed → 可再建
+  };
+
+  // 阶段②「建数据模型」session 状态(镜像 featInfo:匹配带 [datamodel] 标签的 build session)。
+  const datamodelInfo = (): { state: "none" | "building" | "review"; task?: Task } => {
+    const matched = sessions.filter((t) => t.session.instruction.includes("[datamodel]"));
+    if (matched.length === 0) return { state: "none" };
+    const tasks = matched.flatMap((t) => t.tasks);
+    const review = tasks.find((x) => x.stage === "awaiting_review");
+    if (review) return { state: "review", task: review as Task };
+    const active = tasks.find((x) => x.stage === "queued" || x.stage === "running");
+    const planning = matched.some((t) => t.tasks.length === 0 && t.session.state !== "failed");
+    if (active || planning) return { state: "building", task: active as Task | undefined };
+    return { state: "none" }; // 全终态(已合并→ repo.dataModeled 接管;或全 rejected → 可再建)
   };
 
   const screensOf = (moduleName: string) => screens.filter((s) => s.module === moduleName && s.preview_image);
@@ -111,6 +126,24 @@ export function DevCockpit({ productId }: { productId: string }) {
         setMsg(b.error ?? `搭骨架失败: ${r.status}`);
       } else {
         setMsg("🏗 已开始搭骨架 — 见下方「全部编排」,跑完进待审,你审核后落地。");
+      }
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const buildDataModel = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const r = await fetch(`/api/products/${productId}/dev/datamodel`, { method: "POST" });
+      if (!r.ok) {
+        const b = (await r.json().catch(() => ({}))) as { error?: string };
+        setMsg(b.error ?? `建数据模型失败: ${r.status}`);
+      } else {
+        setMsg("🧱 已开始建数据模型 — 把全部实体落成 Postgres schema + RLS,跑完进待审,审核合并后功能点解锁。");
       }
     } catch (e) {
       setMsg(e instanceof Error ? e.message : String(e));
@@ -147,7 +180,7 @@ export function DevCockpit({ productId }: { productId: string }) {
     <section className="border-b border-slate-200 bg-white px-6 py-4">
       <div className="mb-3 flex items-baseline justify-between gap-3">
         <h2 className="text-sm font-semibold text-slate-950">🛠 开发驾驶舱</h2>
-        <span className="text-[11px] text-slate-500">立项规格 → 应用代码:先搭骨架,再逐功能点建造,产出进待审</span>
+        <span className="text-[11px] text-slate-500">立项规格 → 应用代码:① 搭骨架 → ② 建数据模型 → ③ 逐功能点建造,产出进待审</span>
       </div>
 
       {/* ① 码仓 / 脚手架状态 */}
@@ -172,11 +205,63 @@ export function DevCockpit({ productId }: { productId: string }) {
         </div>
       ) : (
         <div className="mb-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] text-emerald-800">
-          ✅ 代码工程已初始化 —— 展开模块,逐功能点建造。
+          ✅ ① 工程骨架已初始化 —— 下一步先建数据模型(②),再逐功能点建造(③)。
         </div>
       )}
 
-      {/* ② 等你拍板 */}
+      {/* ② 建数据模型(地基):未建库前功能点开建硬锁 */}
+      {repo.scaffolded ? (() => {
+        const dm = datamodelInfo();
+        if (repo.dataModeled) {
+          return (
+            <div className="mb-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] text-emerald-800">
+              ✅ ② 数据模型已建 —— 全部实体已落成 Postgres schema + RLS,功能点可基于已存在的表建造。
+            </div>
+          );
+        }
+        if (dm.state === "review" && dm.task) {
+          return (
+            <div className="mb-3 flex items-center justify-between gap-3 rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2.5">
+              <div className="text-[12px] text-indigo-800">
+                <span className="font-semibold">② 数据模型待审</span> —— 建表 / RLS / 类型已产出,审核合并后功能点解锁。
+              </div>
+              <button
+                className="shrink-0 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700"
+                onClick={() => setReviewTask(dm.task!)}
+                type="button"
+              >
+                审核
+              </button>
+            </div>
+          );
+        }
+        if (dm.state === "building") {
+          return (
+            <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 font-mono text-[11px] text-amber-800">
+              <span className="font-semibold font-sans">② 建数据模型中…</span>{" "}
+              <BuildingLine task={dm.task} fallback="agent 正在把实体落成 migrations + RLS…" />
+            </div>
+          );
+        }
+        return (
+          <div className="mb-3 flex items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5">
+            <div className="text-[12px] text-amber-800">
+              <span className="font-semibold">② 建数据模型(地基)</span> —— 把全部实体落成 Postgres schema(建表 + 按校区/角色 RLS)+ TS 类型。
+              <span className="font-semibold">表先真实存在,功能点才能基于它建</span>,否则各功能点各自现编表互相冲突。
+            </div>
+            <button
+              className="shrink-0 rounded-md bg-slate-950 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={busy}
+              onClick={() => void buildDataModel()}
+              type="button"
+            >
+              {busy ? "启动中…" : "🧱 建数据模型"}
+            </button>
+          </div>
+        );
+      })() : null}
+
+      {/* 等你拍板(业务决策,与建造阶段正交) */}
       {pending > 0 ? (
         <div className="mb-3 rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-[12px] text-indigo-800">
           ⚠ <span className="font-semibold">等你拍板 {pending} 项</span>业务决策 —— 去「实体」tab 的「待决策 question」逐条接受/自定义/驳回。
@@ -184,14 +269,14 @@ export function DevCockpit({ productId }: { productId: string }) {
       ) : null}
 
       {/* ③ 建造看板:模块 → 功能点(未搭骨架也展示蓝图,开建按钮锁住) */}
-      <div className="mb-1 text-[11px] font-medium text-slate-500">建造看板 · 模块 → 功能点(建造/审核单元)</div>
+      <div className="mb-1 text-[11px] font-medium text-slate-500">③ 建造看板 · 模块 → 功能点(建造/审核单元)</div>
       {mods.length === 0 ? (
         <div className="rounded-md border border-dashed border-slate-300 px-3 py-3 text-[12px] text-slate-400">该产品暂无模块/功能点。</div>
       ) : (
         <div className="space-y-2">
           {!repo.scaffolded ? (
             <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
-              下面是你 ERP 的蓝图:<b>{mods.length} 个模块 · {mods.reduce((n, m) => n + m.features.length, 0)} 个功能点 · {screens.length} 张原型页</b>(规格一个没少)。先「一键搭骨架」,再逐个开建。
+              下面是你 ERP 的蓝图:<b>{mods.length} 个模块 · {mods.reduce((n, m) => n + m.features.length, 0)} 个功能点 · {screens.length} 张原型页</b>(规格一个没少)。先 ①「一键搭骨架」、②「建数据模型」,再 ③ 逐个开建。
             </div>
           ) : null}
           {mods.map((mod) => {
@@ -264,7 +349,9 @@ export function DevCockpit({ productId }: { productId: string }) {
                                   审核
                                 </button>
                               ) : info.state === "building" ? (
-                                <div className="w-full rounded bg-amber-50 px-2 py-1 text-center text-[11px] text-amber-700">建造中…</div>
+                                <div className="w-full rounded bg-amber-50 px-2 py-1 text-center font-mono text-[10px] text-amber-700">
+                                  <BuildingLine task={info.task} />
+                                </div>
                               ) : info.state === "done" ? (
                                 <button
                                   className="w-full rounded border border-slate-300 px-2 py-1 text-[11px] text-slate-500 hover:bg-white"
@@ -273,13 +360,22 @@ export function DevCockpit({ productId }: { productId: string }) {
                                 >
                                   ↻ 再建/改
                                 </button>
-                              ) : repo.scaffolded ? (
+                              ) : repo.dataModeled ? (
                                 <button
                                   className="w-full rounded bg-slate-900 px-2 py-1 text-[11px] font-medium text-white hover:bg-slate-700"
                                   onClick={() => void buildFeature(mod, f)}
                                   type="button"
                                 >
                                   ▶ 开建
+                                </button>
+                              ) : repo.scaffolded ? (
+                                <button
+                                  className="w-full cursor-not-allowed rounded bg-slate-200 px-2 py-1 text-[11px] font-medium text-slate-400"
+                                  disabled
+                                  title="先「建数据模型」(②)把表落库后才能开建"
+                                  type="button"
+                                >
+                                  🔒 先建数据模型
                                 </button>
                               ) : (
                                 <button
@@ -330,6 +426,28 @@ export function DevCockpit({ productId }: { productId: string }) {
         </div>
       ) : null}
     </section>
+  );
+}
+
+/** build task 最新一步文字(publicView 已把 plan steps 摊平回 task.steps)。 */
+function latestStep(t?: Task): string | null {
+  return t && t.steps && t.steps.length > 0 ? t.steps[t.steps.length - 1].label : null;
+}
+
+/** 「建造中…」卡片/行的实时步骤文字:有最新 step 显示它 + 步数,否则回退占位。 */
+function BuildingLine({ task, fallback = "建造中…" }: { task?: Task; fallback?: string }) {
+  const step = latestStep(task);
+  return (
+    <span className="block truncate">
+      {step ? (
+        <>
+          ⏳ {step}
+          {task?.steps && task.steps.length > 0 ? <span className="opacity-60"> · {task.steps.length} 步</span> : null}
+        </>
+      ) : (
+        fallback
+      )}
+    </span>
   );
 }
 

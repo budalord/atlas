@@ -1,7 +1,7 @@
 import { Router, Request } from "express";
 import { getDataVersion } from "../services/watcher";
 import { inspectRepo } from "../services/repoResolver";
-import { buildScaffoldInstruction } from "../services/generatePromptBuilder";
+import { buildScaffoldInstruction, buildEntityModelInstruction } from "../services/generatePromptBuilder";
 import { createSession } from "../services/sessionOrchestrator";
 import { loadModulesWithFeatures } from "../services/entityLoader";
 
@@ -43,6 +43,31 @@ productDevRouter.post("/scaffold", async (req: Request<{ id: string }>, res, nex
       return;
     }
     const instruction = await buildScaffoldInstruction(productId);
+    const tree = createSession(productId, instruction, "code", { skipCodePlan: true });
+    res.status(201).json({ data: tree, version: getDataVersion() });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/products/:id/dev/datamodel — 建数据模型(阶段 ②)。
+ * 把全部实体落成 Drizzle schema + 迁移 + Postgres RLS,作为逐功能点建造的地基。
+ * 复用 code-instruct 单 Task(worktree + 监管环 + 三态闸);要求先搭骨架。
+ */
+productDevRouter.post("/datamodel", async (req: Request<{ id: string }>, res, next) => {
+  try {
+    const productId = req.params.id;
+    const repo = await inspectRepo(productId);
+    if (!repo.configured) {
+      res.status(400).json({ error: "未配置码仓(meta.repo / 本地 repo 文件 / ATLAS_REPO_* 任一)" });
+      return;
+    }
+    if (!repo.scaffolded) {
+      res.status(400).json({ error: "请先「一键搭骨架」,再建数据模型" });
+      return;
+    }
+    const instruction = await buildEntityModelInstruction(productId);
     const tree = createSession(productId, instruction, "code", { skipCodePlan: true });
     res.status(201).json({ data: tree, version: getDataVersion() });
   } catch (error) {

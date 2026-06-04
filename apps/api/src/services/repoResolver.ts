@@ -88,6 +88,20 @@ async function hasAppCode(repoDir: string): Promise<boolean> {
   }
 }
 
+/**
+ * 该 repo 是否已建完数据模型(阶段 ②)。
+ * 检测建数据模型任务强制产出的清单标记 drizzle/SCHEMA-MANIFEST.md —— 它只在审核合并回主线后
+ * 才落到主 clone,正是"表真实存在"的闸门语义(scaffold 的示范迁移不产出此文件)。
+ */
+async function hasDataModel(repoDir: string): Promise<boolean> {
+  try {
+    await fs.access(path.join(repoDir, "drizzle", "SCHEMA-MANIFEST.md"));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export interface DevRepoInfo {
   /** meta.repo / 本地 repo 文件 / env 任一配了码仓地址 */
   configured: boolean;
@@ -97,6 +111,8 @@ export interface DevRepoInfo {
   cloned: boolean;
   /** 是否已有应用工程骨架(非纯规格) */
   scaffolded: boolean;
+  /** 是否已建完数据模型(阶段 ②:实体落成 migrations + RLS,逐功能点建造的地基) */
+  dataModeled: boolean;
 }
 
 /** 体检码仓状态——**不触发 clone**(给 GET 状态用)。 */
@@ -105,7 +121,8 @@ export async function inspectRepo(productId: string): Promise<DevRepoInfo> {
   const repoDir = repoDirFor(productId);
   const cloned = await isGitWorkTree(repoDir);
   const scaffolded = cloned && (await hasAppCode(repoDir));
-  return { configured: !!url, repoDir, cloned, scaffolded };
+  const dataModeled = scaffolded && (await hasDataModel(repoDir));
+  return { configured: !!url, repoDir, cloned, scaffolded, dataModeled };
 }
 
 /**

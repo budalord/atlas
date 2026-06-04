@@ -4,6 +4,7 @@ import type { ProductMeta } from "@atlas/shared";
 import { DATA_ROOT, dataPath, readTextFile } from "./fileReader";
 import { normalizeProductMeta, parseYaml } from "./markdownParser";
 import { loadEntities, loadModules, loadFeatures } from "./entityLoader";
+import { loadDerivedEntities } from "./derivedEntityLoader";
 import { loadRolesRegistry } from "./rolesRegistry";
 import { parseGlobalFeedbackFile } from "./globalFeedbackParser";
 import { loadActors } from "./actorLoader";
@@ -1476,40 +1477,96 @@ export async function buildCodeSessionPlanPrompt(
  * 返回纯指令串;buildCodeInstructPrompt 会再包上代码运行模式 + 规格上下文。
  */
 export async function buildScaffoldInstruction(productId: string): Promise<string> {
-  const meta = await loadMeta(productId);
   const modules = await loadModules(productId);
-  const stack = meta?.tech_stack?.length ? meta.tech_stack.join("、") : "(未明确,自行选一套主流稳妥的)";
   const modList = modules.length > 0 ? modules.map((m) => `${m.name}(${m.title || m.name})`).join("、") : "(暂无模块,先搭通用骨架)";
 
   return [
     `【开发初始化 · 搭工程骨架】这是本仓第一次落地应用代码,当前仓里只有规格文档,没有可运行的工程。`,
     `请搭出**第一版最小但能跑起来**的应用工程骨架(不是完整功能,是地基)。`,
     "",
-    `## 技术栈(已定,务必照此搭)`,
-    `- 前端:${stack || "Vite + React + TypeScript"}(以 Vite + React + TypeScript 为基)。`,
-    `- **数据层:Supabase(自托管 Postgres)** —— 用 \`@supabase/supabase-js\` 连**自托管**的 Supabase/Postgres:`,
-    `  - **单例 client**(src/lib/supabase.ts),URL/Key 从环境变量读(.env.example 写好 \`VITE_SUPABASE_URL\` / \`VITE_SUPABASE_ANON_KEY\`,**指向自托管地址,绝不硬编码 supabase.co 云地址**——学员是真实 PII,数据须留国内)。`,
-    `  - **行级权限(RLS)**:数据可见性按「校区 / 角色」隔离(本产品多校区多角色),约定每张表都开 RLS,策略按 campus_id + role 控制。`,
-    `  - **realtime**:监控类页面用 Supabase realtime 订阅(规格里有多个"监控页")。`,
-    `  - **数据库 schema 用迁移管理**:建 \`supabase/migrations/\` 目录,放初始迁移 SQL(先建 2-3 张**核心表做示范**,如 Campus / Student / Order,字段对齐规格实体;其余表后续逐功能点补)。`,
-    `业务模块(按它们在源码里分目录:src/modules/<模块>/,先建空骨架不实现具体功能):${modList}。`,
+    `## 技术栈(已定,务必照此搭 —— 内部自用 ERP,轻量省成本)`,
+    `- **Next.js(App Router · TypeScript)前后端一体** —— 页面与后端 API 同一工程(route handlers / server actions);数据访问只在**服务端**(server component / route handler / server action),客户端不直连数据库。`,
+    `- **数据库:PostgreSQL(自托管,非 Supabase 平台)** —— 普通 Postgres,不引 \`@supabase/*\`。`,
+    `- **ORM:Drizzle**(\`drizzle-orm\` + \`drizzle-kit\`)—— schema 即 TS,迁移用 drizzle-kit 生成;类型直接从 Drizzle schema 推断(\`$inferSelect\`/\`$inferInsert\`),不再单独维护 database.types.ts。`,
+    `  - **单例连接**:\`src/db/index.ts\`(pg \`Pool\` + \`drizzle()\` 实例),\`DATABASE_URL\` 从环境变量读(.env.example 写好,**指向自托管/本地 Postgres,绝不硬编码任何云厂商地址**——学员是真实 PII,数据须留自托管)。`,
+    `  - **行级权限(RLS)**:本产品多校区多角色,约定每张表开 Postgres RLS,策略按 \`campus_id\` + 角色;服务端按请求 \`SET LOCAL\` 注入当前校区/角色,RLS 作兜底。`,
+    `  - **监控页 realtime**:用 Next 的 SSE/WebSocket + Postgres \`LISTEN/NOTIFY\`(或先轮询),不引第三方 realtime 服务。`,
+    `  - **迁移目录** \`drizzle/\`:放初始迁移(先建 2-3 张**核心示范表**,如 campus / student / order,字段对齐规格实体;其余表后续 ② 建数据模型阶段补)。`,
+    `- **Docker(本地→服务器无缝)**:仓根 \`docker-compose.yml\` 至少两个服务 —— \`db\`(postgres:16,数据卷持久化)+ \`app\`(Next,读 \`.env\`)。本地 \`docker compose up\` 起全栈,确认 OK 后同一份 compose 原样搬服务器/本地 Windows,差异全收敛进 \`.env\`。配 \`Dockerfile\`(Next 生产构建)。`,
+    `业务模块(在源码里分目录:src/modules/<模块>/,先建空骨架不实现具体功能):${modList}。`,
     "",
     `## 必须产出`,
-    `1. package.json + 依赖(react / vite / typescript / @supabase/supabase-js)+ 能跑通的「安装 / 启动 / 构建」命令,写进 README。`,
-    `2. src/lib/supabase.ts(client 单例)+ .env.example;src/modules/<模块>/ 目录(每模块一个占位入口 + 一句注释 + 预留 data/service 放该模块的查询封装)。`,
-    `3. supabase/migrations/ 初始迁移(2-3 张核心表 + RLS 策略示范);可选 supabase/seed 占位。`,
-    `4. 一个**能真正启动并访问**的最小占位首页(遍历模块注册表渲染,证明骨架是活的;无 DB 连接时也能起来,不白屏)。`,
-    `5. **DEV-CONVENTIONS.md(开发规范 · 后续每个功能点建造都按它)**,至少写清:`,
-    `   - 技术栈与版本;Supabase 自托管连法 + env;**数据层约定**(每模块的查询封装在 src/modules/<m>/data 或 service,**不在组件里散落 supabase 调用**;RLS 怎么用;realtime 怎么用)。`,
-    `   - 目录结构;命名约定;错误处理约定;类型从 DB schema 来源。`,
-    `   - **每个功能点怎么自包含接入**(只动自己模块目录 + 注册表登记,**不改 src/App.tsx 等共享入口**)→ 并行建造不冲突。`,
-    `6. README:技术栈选择、如何安装/启动、如何连自托管 Supabase、目录结构、指向 DEV-CONVENTIONS.md。`,
+    `1. package.json + 依赖(next / react / typescript / drizzle-orm / drizzle-kit / pg)+ 能跑通的「安装 / 开发 / 构建 / 迁移」命令,写进 README。`,
+    `2. \`src/db/index.ts\`(连接单例)+ \`src/db/schema/\`(每模块一文件,先放示范表)+ \`drizzle.config.ts\` + \`.env.example\`;\`src/modules/<模块>/\` 目录(每模块占位入口 + 一句注释 + 预留 data/service 放该模块的查询封装)。`,
+    `3. \`drizzle/\` 初始迁移(2-3 张核心表 + RLS 策略示范)+ 可选 seed 占位。`,
+    `4. \`docker-compose.yml\`(db + app)+ \`Dockerfile\`,确保 \`docker compose up\` 能起来。`,
+    `5. 一个**能真正启动并访问**的最小占位首页(遍历模块注册表渲染,证明骨架是活的;无 DB 连接时也能起来,不白屏)。`,
+    `6. **DEV-CONVENTIONS.md(开发规范 · 后续每个功能点建造都按它)**,至少写清:`,
+    `   - 技术栈与版本;自托管 Postgres 连法 + env;**数据层约定**(每模块查询封装在 src/modules/<m>/data 或 service,用 Drizzle,**不在组件里散落 DB 调用**;只在服务端访问;RLS 怎么用;realtime 怎么做)。`,
+    `   - 目录结构;命名约定(表/列 snake_case);错误处理约定;类型从 Drizzle schema 推断。`,
+    `   - **每个功能点怎么自包含接入**(只动自己模块目录 + 注册表登记,**不改全局入口/根 layout**)→ 并行建造不冲突。`,
+    `7. README:技术栈选择、如何用 Docker 起、如何连自托管 Postgres、如何跑迁移、目录结构、指向 DEV-CONVENTIONS.md。`,
     "",
     `## 并行友好架构(重要)`,
-    `后续多个功能点**并行**往里填代码。入口必须**数据驱动 / 自动发现**:App 遍历模块/路由**注册表**渲染,`,
+    `后续多个功能点**并行**往里填代码。入口必须**数据驱动 / 自动发现**:首页/路由遍历模块**注册表**渲染,`,
     `新功能点只在自己模块目录登记一项、**无需改动入口文件**;避免改全局共享文件 → 避免并行合并冲突。`,
     "",
-    `不要实现具体业务逻辑(那是后续逐功能点建造的事);只要地基稳、能跑、结构清楚、数据层接好、并行友好。最小依赖,别堆无关库。`
+    `不要实现具体业务逻辑(那是后续逐功能点建造的事);只要地基稳、能 Docker 跑、结构清楚、数据层接好、并行友好。最小依赖,别堆无关库。`
+  ].join("\n");
+}
+
+/**
+ * 开发阶段 ②「建数据模型」指令(交给 code-instruct 单 Task 跑)。
+ * 把全部派生实体(derived/entities/*.md,权威 schema 源)落成 Drizzle schema + drizzle 迁移 + Postgres RLS,
+ * 并强制产出 drizzle/SCHEMA-MANIFEST.md(给 inspectRepo 检测"数据模型已建")。
+ * 是逐功能点建造的地基:表先真实存在,功能点才基于已存在的表建,避免各自现编表互相冲突。
+ *
+ * 首行带 [datamodel] 标签,供前端驾驶舱匹配本阶段 Session(镜像 [feat:..] 机制)。
+ * agent cwd 是真码仓读不到 data/,所以把实体 schema 直接嵌进指令(同 loadFeatureSpecBlock 思路)。
+ */
+export async function buildEntityModelInstruction(productId: string): Promise<string> {
+  const entities = await loadDerivedEntities(productId);
+
+  // 实体 schema 块:name [layer] + 完整 body(字段表/状态机/决策);单实体限长防 prompt 爆。
+  const entityBlocks = entities.map((e) => {
+    const head = `### ${e.name}${e.layer && e.layer !== "[TBD]" ? `(归属层:${e.layer})` : ""}`;
+    return `${head}\n\`\`\`md\n${e.body.slice(0, 1800)}\n\`\`\``;
+  });
+
+  const entityIndex = entities
+    .map((e) => `- ${e.name}${e.layer && e.layer !== "[TBD]" ? ` [${e.layer}]` : ""}`)
+    .join("\n");
+
+  return [
+    `[datamodel] 【开发 ② · 建数据模型(地基)】把本产品全部 ${entities.length} 个实体落成数据库 schema —— 这是逐功能点建造前必须先打的地基:表真实存在后,功能点才基于已存在的表建,避免每个功能点各自现编表互相冲突。`,
+    `本任务只建**数据层地基**(Drizzle schema + 迁移 + RLS),**不实现任何功能点的业务逻辑/页面**(那是后续 ③ 逐功能点的事)。`,
+    "",
+    `## 技术栈(已定)`,
+    `- **Postgres(自托管)+ Drizzle ORM**,schema 即 TS;迁移用 drizzle-kit 生成。**不用 Supabase 平台/不引 \`@supabase/*\`**。类型直接从 Drizzle schema 推断(\`$inferSelect\`/\`$inferInsert\`),不另造 database.types.ts。`,
+    "",
+    `## 必须产出`,
+    `1. **\`src/db/schema/\` 为全部 ${entities.length} 个实体写 Drizzle 表定义**(\`pgTable\`,按模块分文件;沿用脚手架已有的 \`src/db/schema/\` 体系):`,
+    `   - 列名/类型/必填(\`notNull\`)/默认值/唯一/约束/关系**以下方实体 schema 为权威源**,不要凭空增删字段;schema 里标 \`[TBD]\` 的,留 \`// TODO\` 注释,**不要瞎编**。`,
+    `   - 表名/列名用 **snake_case**(PascalCase 实体名 → snake_case 表名,如 RefundApplication → refund_application);遵守仓内 \`DEV-CONVENTIONS.md\` 命名约定。`,
+    `   - 外键/关系按 schema 的「关系」段落建(\`references(() => other.id)\` + 必要的 \`relations()\`),注意依赖顺序。`,
+    `   - **不要重复定义脚手架已建的核心示范表**(如 campus / student / order 可能已存在):扩展同一 schema 体系,已存在的对齐而非重复声明。`,
+    `2. **用 drizzle-kit 生成迁移到 \`drizzle/\`**(\`drizzle-kit generate\`),迁移可应用、含全部新表。`,
+    `3. **每张表开 Postgres 行级权限(RLS)**(写进迁移 SQL):`,
+    `   - 按实体的**归属层**定策略 —— 机构层表全机构可见、**校区层表按 \`campus_id\` 隔离**(每条数据归属某校区,RLS 限定只能看本校区);再叠加**角色**维度,服务端按请求 \`SET LOCAL\` 注入当前校区/角色。`,
+    `   - 学员是真实 PII,数据须留自托管 Postgres,RLS 必须开,**绝不指向任何云厂商托管地址**。`,
+    `4. **强制产出 \`drizzle/SCHEMA-MANIFEST.md\`** —— 列出本次建的**全部表名**(及对应实体名/归属层/迁移文件 + RLS 策略一句话),作为"数据模型已建"的清单标记。**这个文件必须产出**,否则地基视为未完成。`,
+    "",
+    `## 必读(仓内,严格遵循)`,
+    `- \`DEV-CONVENTIONS.md\`:技术栈/数据层约定(Drizzle)/自托管 Postgres 连法/命名/目录结构 —— 建表与类型都照它。`,
+    `- \`CONVENTIONS.md\` 与 \`DECISIONS.md\`:业务规则与既定决策(字段含义/状态机/权限边界),schema 落库不得与之冲突。`,
+    "",
+    `## 实体归属层索引(${entities.length} 个 · RLS 定级参考)`,
+    entityIndex || "(无 — 未找到派生实体,请先在 Atlas 跑实体派生)",
+    "",
+    `## 全部实体完整 schema(权威源 · 建表照此)`,
+    entityBlocks.length > 0 ? entityBlocks.join("\n\n") : "(无)",
+    "",
+    `不要实现具体业务/UI;只把数据层地基打稳、打全、可迁移、RLS 到位。最小依赖。`
   ].join("\n");
 }
 
