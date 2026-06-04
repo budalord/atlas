@@ -1306,6 +1306,15 @@ export async function buildCodeInstructPrompt(
     // 关键:把本功能点的**完整规格 + 实体 schema**(权威源)摆上桌,代码必须对得上它
     featSpec ?? "",
     "",
+    // 下面这组数据层硬约束**只对功能点建造(带 [feat:] 标签,featSpec 命中)生效**。
+    // ① 搭骨架 / ② 建数据模型本就要建 schema、写 src/db 单例,套这组会自相矛盾(曾导致 ② 重跑判"无需改动")。
+    featSpec
+      ? `## 硬性约束(数据层 · 违反必被监管打回,不可商量)
+- **RLS 上下文必经 \`withRlsContext\`**:任何数据库读写**必须**用 \`src/db/index.ts\` 的 \`withRlsContext({ campusId, role, userId }, ...)\` 包裹(它在事务内 \`set_config\` 注入 app.role / app.campus_id)。**禁止**裸 \`db.select/insert/update/delete\` 或裸 \`pool.query\` 直接读写业务表 —— app 以受限角色 \`yunkai_app\` 连库,**不注入上下文 RLS 会把行全部挡掉、写入直接被拒**,功能等于瘫痪。把 actor 的 role/campusId/userId 一路传到 data 层交给 withRlsContext,别在无上下文下查库。
+- **不碰数据库 schema**:本任务是功能点建造,**禁止**修改 \`src/db/schema/**\` 或新增/改动 \`drizzle/\` 迁移。若发现缺字段/缺表/缺约束,**不要自己加**——在最终说明里列一节「需要 ② 补的 schema 变更」交回数据模型阶段统一处理(并行建造时各功能点改 schema 会互相冲突)。只用**已存在**的表与列。
+- **严格分层**:Drizzle 查询只写在 \`src/modules/<模块>/data/\`;业务编排写在 \`service/\`;页面/组件**只调 service**,**不得**出现任何 DB 调用或 \`@/db\` import。`
+      : "",
+    "",
     `## 产品规范(业务规则 · 必读且不得违背)
 读仓内 \`CONVENTIONS.md\` 与 \`DECISIONS.md\`(本仓镜像了规格),遵守其中的业务约定、命名、既定决策;
 你的实现不得与之冲突。涉及金额/状态机/权限/对接(飞书·凡科)等业务规则,以规范与上面的功能点规格为准,不要自创。`,
@@ -1339,6 +1348,14 @@ export async function buildValidatePrompt(
   changedPaths: string[],
   mode: "spec" | "code"
 ): Promise<{ prompt: string }> {
+  // 数据层硬检查只对【功能点建造】(带 [feat:] 标签)生效;① 搭骨架 / ② 建数据模型本就要建 schema、写 db 单例,套这组会误杀。
+  const isFeatureBuild = /\[feat:/.test(instruction);
+  const featureChecks = isFeatureBuild
+    ? `
+- **RLS 强制(数据层硬闸)**:凡出现数据库访问(\`db.\`/\`.select(\`/\`.insert(\`/\`.update(\`/\`.delete(\`/\`pool.query\`)的地方,**必须**包在 \`withRlsContext(...)\` 内(注入 app.role / app.campus_id)。发现任何**未经 withRlsContext 的裸 DB 访问** → pass=false —— 否则 app 以 \`yunkai_app\` 连库时 RLS 会让该功能查不到数据、写入被拒。
+- **禁改 schema(功能点任务)**:若改动 touch 了 \`src/db/schema/**\` 或 \`drizzle/**\`(schema 定义 / 迁移),一律 pass=false —— schema 变更属 ② 数据模型阶段,功能点只能用已存在的表/列,缺字段须回吐给 ② 而非自己加。
+- **分层**:页面/组件(\`src/app/**\` 下的 .tsx)内**不得**直接出现 DB 调用或 \`@/db\` import;查询须落在 \`src/modules/<模块>/data/\`,组件只调 service。违反 → pass=false。`
+    : "";
   const checklist =
     mode === "spec"
       ? `- 每个改动文件按对应 contract 自查(docs/<scope>-contract.md):feature/entity/usecase/screen/actor
@@ -1346,7 +1363,7 @@ export async function buildValidatePrompt(
 - 跨文件一致性:被引用的 id 真实存在;revise 任务 needs_revision 已清、反馈池已处理。
 - 是否真的落实了"决策者需求",还是答非所问 / 漏改。`
       : `- **语法逐行核对**:括号 () / 大括号 {} / 方括号 [] 是否成对闭合、函数签名与调用是否完整、
-  字符串/注释是否闭合、引用的变量/函数/模块/路径是否真实存在。**任何语法错误一律 pass=false。**
+  字符串/注释是否闭合、引用的变量/函数/模块/路径是否真实存在。**任何语法错误一律 pass=false。**${featureChecks}
 - 与需求一致:确实实现了"决策者需求",非答非所问 / 半成品 / 占位空壳。
 - 自洽:新增/改动的代码与仓内既有约定、相邻文件风格一致;无明显逻辑漏洞。`;
 
@@ -1549,6 +1566,8 @@ export async function buildEntityModelInstruction(productId: string): Promise<st
     `   - 列名/类型/必填(\`notNull\`)/默认值/唯一/约束/关系**以下方实体 schema 为权威源**,不要凭空增删字段;schema 里标 \`[TBD]\` 的,留 \`// TODO\` 注释,**不要瞎编**。`,
     `   - 表名/列名用 **snake_case**(PascalCase 实体名 → snake_case 表名,如 RefundApplication → refund_application);遵守仓内 \`DEV-CONVENTIONS.md\` 命名约定。`,
     `   - 外键/关系按 schema 的「关系」段落建(\`references(() => other.id)\` + 必要的 \`relations()\`),注意依赖顺序。`,
+    `   - **标配审计列 + 软下架(每张业务表统一)**:除非实体 schema 明确不需要,每张表都加 \`created_by\` / \`created_at\` / \`updated_at\`,需要软下架的再加 \`archived_at\`(或 \`is_deleted\`),与脚手架核心表(campus / student / order)一致;时间列用 \`timestamp with time zone\` 默认 \`now()\`。**字典 / 基础数据表也不例外** —— 下游功能点要靠这些列做审计与软下架,缺了会逼功能点改 schema(而功能点阶段禁止改 schema)。`,
+    `   - **唯一约束按业务键补**:实体 schema 标了"唯一 / 不可重复"的字段(如字典项名在其作用域内唯一、手机号唯一等),用 \`uniqueIndex\` 落库,别只靠主键。`,
     `   - **不要重复定义脚手架已建的核心示范表**(如 campus / student / order 可能已存在):扩展同一 schema 体系,已存在的对齐而非重复声明。`,
     `2. **用 drizzle-kit 生成迁移到 \`drizzle/\`**(\`drizzle-kit generate\`),迁移可应用、含全部新表。`,
     `3. **每张表开 Postgres 行级权限(RLS)**(写进迁移 SQL):`,
